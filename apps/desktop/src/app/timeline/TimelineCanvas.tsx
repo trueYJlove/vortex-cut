@@ -132,6 +132,14 @@ import {
   hitTestCanvasPointerDown,
 } from "./canvas/hit-test.js";
 import { clampRulerTime as clampRulerTimeToTotal, useRulerScrubGesture } from "./canvas/gestures/ruler-scrub.js";
+import {
+  beginMoveGesture,
+  commitMoveGesture,
+  stepAutoScrollMoveInteraction,
+  stepGroupMoveGesture,
+  stepMoveGesture,
+  type MoveSnapTargetCache,
+} from "./canvas/gestures/move-gesture.js";
 
 export {
   THUMB_CELL_PX,
@@ -774,14 +782,7 @@ export function TimelinePanel({
   } | null>(null);
   // Synchronous mirror of interaction so pointer handlers always read the latest value.
   const interactionRef = useRef<TimelineInteraction | null>(null);
-  const moveSnapTargetsRef = useRef<{
-    clipRects: ClipRenderRect[];
-    markers: TimelineMarker[];
-    withoutRiders: number[];
-    withRiders: number[];
-    withoutRidersOrder: ReadonlyMap<number, number>;
-    withRidersOrder: ReadonlyMap<number, number>;
-  } | null>(null);
+  const moveSnapTargetsRef = useRef<MoveSnapTargetCache | null>(null);
   const activeCanvasPointerIdRef = useRef<number | null>(null);
   const lastClientPointerRef = useRef<{ clientX: number; clientY: number; pointerId: number; altKey: boolean } | null>(null);
   const pointerDragLiftedRef = useRef(false);
@@ -1764,37 +1765,6 @@ export function TimelinePanel({
     return next.length === 0 ? null : next.length === 1 ? { kind: "clip", id: next[0] } : { kind: "clips", ids: next };
   };
 
-  /** Resolve a drop from the pointer's real row and OpenFilm's clip/lane edge zones. */
-  const resolveDragTargeting = useCallback(
-    (active: MoveInteraction): { targetTrackId: string | null; pointerRatio: number; dropHit: ReturnType<typeof timelineDropHit> } => {
-      const draggedClip = clips.find((c) => c.clip_id === active.clipId);
-      // OpenFilm removes linked main-track riders from clip-drop hit testing while linkage is on.
-      // Their row remains a valid destination; the rider itself cannot become a replace/edge target.
-      const excluded = timelineDragDropExcludedClipIds(
-        active.clipIds,
-        active.linkedRiderClipIds,
-        prefs.linkageEnabled,
-      );
-      const hit = timelineDropHit(active.currentX, active.currentY, trackRows, clipRects, excluded);
-      // OpenFilm copy gestures ignore clip edge/replace targets; they still honor the row's lane band.
-      const dropHit = active.copyOnStart && hit.band === "body"
-        ? { ...hit, clipId: null, zone: null }
-        : hit;
-      if (!draggedClip) return { targetTrackId: null, pointerRatio: 0, dropHit };
-      let pointerRatio = 0;
-      const row = dropHit.rowIndex >= 0 ? trackRows[dropHit.rowIndex] : null;
-      const targetTrackId = dropHit.band === "body" && row
-        ? row.track.id
-        : null;
-      if (dropHit.clipId) {
-        const targetRect = clipRects.find(rect => rect.clip.clip_id === dropHit.clipId);
-        if (targetRect?.width) pointerRatio = Math.max(0, Math.min(1, (active.currentX - targetRect.x) / targetRect.width));
-      }
-      return { targetTrackId, pointerRatio, dropHit };
-    },
-    [clips, trackRows, clipRects, prefs.linkageEnabled],
-  );
-
   // ── 轨道管理：新增/删除/换位/属性开关 ────────────────────────────────────
   const addTrack = (kind: "video" | "text") => {
     void onPatch(
@@ -2076,75 +2046,26 @@ export function TimelinePanel({
           beginAdvancedEdit("slide", [previous.clip_id, clip.clip_id, next.clip_id], x, canvas);
           return;
         }
-        const selectedGroup = selectionForDrag?.kind === "clips" && selectionForDrag.ids.includes(clipId)
-          ? selectionForDrag.ids
-          : selectionForDrag?.kind === "clip" && selectionForDrag.id === clipId ? [selectionForDrag.id] : [clipId];
-        const capturedClipIds = [...new Set(selectedGroup.flatMap(id => {
-          const member = clips.find(item => item.clip_id === id);
-          return member?.link_group_id
-            ? clips.filter(item => item.link_group_id === member.link_group_id).map(item => item.clip_id)
-            : [id];
-        }))].filter(id => clips.some(item => item.clip_id === id) && !isClipLocked(id as TimelineClipId, true));
-        const capturedMembers = capturedClipIds.map(id => clips.find(item => item.clip_id === id)!).filter(Boolean);
-        const copyIds = event.altKey ? capturedClipIds.map(() => createTimelineClipId()) : [];
-        const moveClipIds = capturedMembers.map(member => member.clip_id);
-        const linkedRiderClipIds = document
-          ? linkedRiderClipIdsForDrag(document, moveClipIds, event.altKey)
-          : [];
-        if (prefs.snappingEnabled) {
-          const makeSnapTargets = (excluded: Set<TimelineClipId>) => orderedMoveSnapTargets(
-            clipRects,
-            markers.map(marker => marker.timeUs),
-            excluded,
-          );
-          const withoutRiders = makeSnapTargets(new Set(moveClipIds));
-          const withRiderExclusions = new Set(moveClipIds);
-          for (const riderId of linkedRiderClipIds) withRiderExclusions.add(riderId);
-          const withRiders = makeSnapTargets(withRiderExclusions);
-          moveSnapTargetsRef.current = {
-            clipRects,
-            markers,
-            withoutRiders: withoutRiders.times,
-            withRiders: withRiders.times,
-            withoutRidersOrder: withoutRiders.orderByTime,
-            withRidersOrder: withRiders.orderByTime,
-          };
-        } else {
-          moveSnapTargetsRef.current = null;
-        }
-        if (!event.altKey) {
-          setSelection(capturedClipIds.length > 1
-            ? { kind: "clips", ids: capturedClipIds }
-            : { kind: "clip", id: capturedClipIds[0] ?? clipId });
-        } else if (!(selection?.kind === "clips" && selection.ids.includes(clipId))) {
-          setSelection(capturedClipIds.length > 1
-            ? { kind: "clips", ids: capturedClipIds }
-            : { kind: "clip", id: clipId });
-        }
-        const next: TimelineInteraction = {
-          kind: "move",
+        const started = beginMoveGesture({
           clipId,
-          ignoreLink: false,
-          startX: x,
-          startY: y,
-          currentX: x,
-          currentY: y,
-          startUs: clip.timeline_start_us,
-          previewStartUs: clip.timeline_start_us,
-          targetStartUs: clip.timeline_start_us,
-          targetTrackId: null,
-          resolution: null,
-          snapUs: null,
-          copyOnStart: event.altKey,
-          moveMode: "place",
-          clipIds: moveClipIds,
-          linkedRiderClipIds,
-          copyIds,
-          dragPlan: null,
-          dropHit: null,
-        };
-        interactionRef.current = next;
-        setInteraction(next);
+          clip,
+          x,
+          y,
+          altKey: event.altKey,
+          clips,
+          clipRects,
+          markers,
+          document,
+          snappingEnabled: prefs.snappingEnabled,
+          selectionForDrag,
+          selection,
+          isClipLocked,
+          createClipId: createTimelineClipId,
+        });
+        moveSnapTargetsRef.current = started.snapTargets;
+        if (started.shouldSetSelection) setSelection(started.nextSelection);
+        interactionRef.current = started.interaction;
+        setInteraction(started.interaction);
         return;
       }
 
@@ -2286,152 +2207,42 @@ export function TimelinePanel({
           return;
         }
         if (active.kind === "move") {
-          const deltaUs = ((x - active.startX) / pps) * 1_000_000;
-          const movingClip = clips.find(c => c.clip_id === active.clipId);
-          const captured = active.clipIds.map(id => clips.find(clip => clip.clip_id === id)).filter((clip): clip is TimelineClip => Boolean(clip));
-          const linkedStarts = captured.length ? captured.map(clip => clip.timeline_start_us) : [active.startUs];
-          const minStartUs = Math.max(0, active.startUs - Math.min(...linkedStarts));
-          const rawStartUs = Math.max(minStartUs, active.startUs + deltaUs);
-          const clipDurationUs = movingClip ? movingClip.timeline_end_us - movingClip.timeline_start_us : 0;
-          const threshold = (SNAP_PX / pps) * 1_000_000;
-          const moveMode = active.copyOnStart ? "place" : event.altKey ? "insert" : "place";
-          const frameAlignedStartUs = Math.max(minStartUs, snapTimeToFrame(rawStartUs, fpsNum, fpsDen));
-          const rawStep: MoveInteraction = {
-            ...active,
-            currentX: x,
-            currentY: y,
-            targetStartUs: frameAlignedStartUs,
-            moveMode,
-          };
-          const { targetTrackId, dropHit } = resolveDragTargeting(rawStep);
-          const planAt = (leadStartUs: number) => clipDragPlanner?.({
-            clipIds: active.clipIds,
-            leadClipId: active.clipId,
-            leadStartUs,
-            pointerTimeUs: xToTime(x, view),
-            dropHit,
-            targetTrackId,
-            mode: moveMode,
-            copyOnStart: active.copyOnStart,
-            copyIds: active.copyIds,
+          const moved = stepMoveGesture({
+            active,
+            x,
+            y,
+            altKey: event.altKey,
+            view,
+            clips,
+            trackRows,
+            clipRects,
+            markers,
+            playheadUs: activePlayheadStore.get(),
+            fpsNum,
+            fpsDen,
+            snappingEnabled: prefs.snappingEnabled,
             mainTrackMagnet: prefs.mainTrackMagnet,
             linkageEnabled: prefs.linkageEnabled,
-            snappingEnabled: prefs.snappingEnabled,
-            flushToleranceUs: threshold,
-          }) ?? null;
-          // Candidate times are sorted and cached for the gesture. Rebuild only if the latest
-          // document geometry or marker list changes; the moving playhead is supplied separately.
-          let snapTargets = moveSnapTargetsRef.current;
-          if (!snapTargets || snapTargets.clipRects !== clipRects || snapTargets.markers !== markers) {
-            const makeSnapTargets = (excluded: Set<TimelineClipId>) => orderedMoveSnapTargets(
-              clipRects,
-              markers.map(marker => marker.timeUs),
-              excluded,
-            );
-            const withoutRiders = makeSnapTargets(new Set(active.clipIds));
-            const withRiderExclusions = new Set(active.clipIds);
-            for (const riderId of active.linkedRiderClipIds) withRiderExclusions.add(riderId);
-            const withRiders = makeSnapTargets(withRiderExclusions);
-            snapTargets = {
-              clipRects,
-              markers,
-              withoutRiders: withoutRiders.times,
-              withRiders: withRiders.times,
-              withoutRidersOrder: withoutRiders.orderByTime,
-              withRidersOrder: withRiders.orderByTime,
-            };
-            moveSnapTargetsRef.current = snapTargets;
-          }
-          const selectedSnapTargets = prefs.snappingEnabled
-            ? (prefs.linkageEnabled
-              ? { values: snapTargets.withRiders, order: snapTargets.withRidersOrder }
-              : { values: snapTargets.withoutRiders, order: snapTargets.withoutRidersOrder })
-            : { values: [] as number[], order: undefined };
-          const candidates = selectedSnapTargets.values;
-          const playheadUs = activePlayheadStore.get();
-          const startSnap = prefs.snappingEnabled
-            ? snapResultSorted(rawStartUs, candidates, threshold, playheadUs, selectedSnapTargets.order)
-            : { valueUs: rawStartUs, snappedTo: null };
-          const endSnap = prefs.snappingEnabled
-            ? snapResultSorted(rawStartUs + clipDurationUs, candidates, threshold, playheadUs, selectedSnapTargets.order)
-            : { valueUs: rawStartUs + clipDurationUs, snappedTo: null };
-          const startDelta = startSnap.valueUs - rawStartUs;
-          const endDelta = endSnap.valueUs - (rawStartUs + clipDurationUs);
-          const useEnd = endSnap.snappedTo !== null && (startSnap.snappedTo === null || Math.abs(endDelta) < Math.abs(startDelta));
-          const snappedTo = useEnd ? endSnap.snappedTo : startSnap.snappedTo;
-          const landedStartUs = snappedTo === null
-            ? snapTimeToFrame(rawStartUs + (useEnd ? endDelta : startDelta), fpsNum, fpsDen)
-            : Math.round(rawStartUs + (useEnd ? endDelta : startDelta));
-          const targetStartUs = Math.max(minStartUs, landedStartUs);
-          const step: MoveInteraction = {
-            ...rawStep,
-            currentX: x,
-            currentY: y,
-            targetStartUs,
-            moveMode,
-          };
-          const dragPlan = planAt(targetStartUs);
-          const landed = dragPlan?.lead;
-          const resolution = landed ? {
-            startUs: landed.startUs,
-            trackId: landed.trackId,
-            mode: dropHit?.zone === "before" ? "before" as const : dropHit?.zone === "after" ? "after" as const : "free" as const,
-          } : null;
-          const next: TimelineInteraction = {
-            ...step,
-            previewStartUs: rawStartUs,
-            targetStartUs: landed?.startUs ?? targetStartUs,
-            targetTrackId: landed?.trackId ?? targetTrackId,
-            dropHit,
-            resolution,
-            dragPlan,
-            snapUs: landed?.startUs === targetStartUs && targetStartUs === rawStartUs + (useEnd ? endDelta : startDelta)
-              ? (useEnd ? endSnap.snappedTo : startSnap.snappedTo) : null,
-          };
-          interactionRef.current = next;
-          setInteraction(next);
+            snapTargetsCache: moveSnapTargetsRef.current,
+            clipDragPlanner,
+          });
+          moveSnapTargetsRef.current = moved.snapTargetsCache;
+          interactionRef.current = moved.interaction;
+          setInteraction(moved.interaction);
           canvas.style.cursor = "grabbing";
           return;
         }
         if (active.kind === "group-move") {
-          const deltaUs = ((x - active.startX) / pps) * 1_000_000;
-          const starts = active.clipIds.map((id) => active.startUsByClip[id] ?? 0);
-          const anchorStart = Math.min(...starts);
-          const rawAnchor = Math.max(0, anchorStart + deltaUs);
-          const threshold = (SNAP_PX / pps) * 1_000_000;
-          const excluded = new Set(active.clipIds);
-          const candidates = prefs.snappingEnabled
-            ? [
-                ...snapCandidates(clipRects, activePlayheadStore.get(), excluded),
-                ...markers.map(marker => marker.timeUs),
-              ]
-            : [];
-          const snappedAnchor = snapValue(rawAnchor, candidates, threshold);
-          const rawDelta = snappedAnchor - anchorStart;
-          const members = active.clipIds
-            .map((id) => clips.find((c) => c.clip_id === id))
-            .filter((c): c is TimelineClip => Boolean(c));
-          // 视频组：刚体平移 + 同轨无重叠钳制；音频组：自由平移（原点钳制）。
-          const groupTrackId = members[0]?.track_id ?? null;
-          const finalDelta =
-            members.length > 0 && members[0].asset_kind !== "audio"
-              ? clampGroupDelta(
-                  members,
-                  clips.filter(
-                    (c) => c.track_id === groupTrackId && !excluded.has(c.clip_id),
-                  ),
-                  rawDelta,
-                )
-              : resolveGroupMove(starts, rawDelta).actualDeltaUs;
-          const targetStartUsByClip: Record<string, number> = {};
-          for (const id of active.clipIds) {
-            targetStartUsByClip[id] = Math.max(0, (active.startUsByClip[id] ?? 0) + finalDelta);
-          }
-          const next: TimelineInteraction = {
-            ...active,
-            targetStartUsByClip,
-            snapUs: Math.abs(snappedAnchor - rawAnchor) > 1 ? snappedAnchor : null,
-          };
+          const next = stepGroupMoveGesture({
+            active,
+            x,
+            pixelsPerSecond: pps,
+            snappingEnabled: prefs.snappingEnabled,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+          });
           interactionRef.current = next;
           setInteraction(next);
           canvas.style.cursor = "grabbing";
@@ -2735,7 +2546,7 @@ export function TimelinePanel({
       });
       canvas.style.cursor = cursor;
     },
-    [view, onSeek, clipRects, clips, markers, activePlayheadStore, prefs.snappingEnabled, prefs.mainTrackMagnet, totalUs, frameRate, frameUs, fpsNum, fpsDen, assetDurationById, document, canvasSize.width, canvasSize.height, trackRows, resolveDragTargeting, scrubMode, getAdvancedEditPlan, setToolbarFeedback, clipDragPlanner],
+    [view, onSeek, clipRects, clips, markers, activePlayheadStore, prefs.snappingEnabled, prefs.mainTrackMagnet, prefs.linkageEnabled, totalUs, frameRate, frameUs, fpsNum, fpsDen, assetDurationById, document, canvasSize.width, canvasSize.height, trackRows, scrubMode, getAdvancedEditPlan, setToolbarFeedback, clipDragPlanner],
   );
 
   // OpenFilm changes Place ↔ Insert as Alt is pressed/released during an active move,
@@ -2842,71 +2653,16 @@ export function TimelinePanel({
         const x = (event && canvasCoords(event)?.x) ?? lastPointerRef.current?.x ?? active.startX;
         (onSeekCommit ?? onSeek)?.(clampRulerTime(xToTime(x, view)));
       } else if (active.kind === "move") {
-        const clip = clips.find((c) => c.clip_id === active.clipId);
-        const plan = active.dragPlan;
-        if (clip && plan) {
-          if (plan.reason) setToolbarFeedback(plan.reason);
-          else setToolbarFeedback("");
-          if (plan.operations.length) {
-            if (active.copyOnStart) {
-              const copies = plan.operations.find(operation => operation.op === "duplicate_timeline_items");
-              if (copies?.op === "duplicate_timeline_items") {
-                const ids = copies.copies.map(copy => copy.copy_id as TimelineClipId);
-                setSelection(ids.length > 1 ? { kind: "clips", ids } : { kind: "clip", id: ids[0]! });
-              }
-            }
-            const isReplace = plan.operations.some(operation => operation.op === "remove_clip");
-            const isInsert = active.moveMode === "insert" || active.dropHit?.zone === "before" || active.dropHit?.zone === "after";
-            const summary = active.copyOnStart ? "复制片段" : isReplace ? "替换片段" : isInsert ? "插入移动片段" : "移动片段";
-            if (isReplace) {
-              const remove = plan.operations.find(operation => operation.op === "remove_clip");
-              if (remove?.op === "remove_clip") {
-                const affectedIds = new Set<TimelineClipId>([...active.clipIds, remove.clip_id]);
-                for (const operation of plan.operations) if (operation.op === "position_clips") {
-                  for (const placement of operation.placements) affectedIds.add(placement.clip_id);
-                }
-                const expected = (document?.clips ?? []).filter(item => affectedIds.has(item.clip_id)).map(item => ({
-                  clipId: item.clip_id,
-                  trackId: item.track_id,
-                  startUs: item.timeline_start_us,
-                  endUs: item.timeline_end_us,
-                }));
-                setReplaceClipRequest({ operations: plan.operations, targetClipId: remove.clip_id, expected });
-              }
-            } else {
-              if (plan.lead) {
-                const placements = new Map<TimelineClipId, { clipId: TimelineClipId; trackId: string; startUs: number }>();
-                for (const item of plan.placements) placements.set(item.clipId as TimelineClipId, {
-                  clipId: item.clipId as TimelineClipId,
-                  trackId: item.trackId,
-                  startUs: Math.round(item.startUs),
-                });
-                placements.set(plan.lead.clipId as TimelineClipId, {
-                  clipId: plan.lead.clipId as TimelineClipId,
-                  trackId: plan.lead.trackId,
-                  startUs: Math.round(plan.lead.startUs),
-                });
-                const copiesById = new Map<TimelineClipId, TimelineClipId>();
-                for (const operation of plan.operations) if (operation.op === "duplicate_timeline_items") {
-                  for (const copy of operation.copies) if (copy.item_kind === "clip") {
-                    copiesById.set(copy.copy_id as TimelineClipId, copy.source_id as TimelineClipId);
-                  }
-                }
-                const copies = plan.placements.flatMap(item => {
-                  const sourceClipId = copiesById.get(item.clipId as TimelineClipId);
-                  return sourceClipId ? [{
-                    clipId: item.clipId as TimelineClipId,
-                    sourceClipId,
-                    trackId: item.trackId,
-                    startUs: Math.round(item.startUs),
-                  }] : [];
-                });
-                setPendingKeep({ placements: [...placements.values()], copies });
-              }
-              void onPatch(plan.operations, summary);
-            }
-          }
-        }
+        commitMoveGesture({
+          active,
+          clips,
+          document,
+          setToolbarFeedback,
+          setSelection,
+          setReplaceClipRequest,
+          setPendingKeep,
+          onPatch,
+        });
       } else if (active.kind === "group-move") {
         const ops: TimelinePatchOperation[] = active.clipIds
           .map((id) => ({
@@ -3052,7 +2808,7 @@ export function TimelinePanel({
     activeCanvasPointerIdRef.current = null;
     // 依赖里含 clips：文档更新（补丁生效）后本回调重建，但 pendingKeep 已在
     // 下面的 effect 中消费完毕，不会残留。
-  }, [clips, captions, clipRects, contentClipRects, onPatch, setSelection, selection, toggleClipSelection, onSeek, onSeekCommit, view, totalUs, canvasTopY, resolveDragTargeting, document, prefs.mainTrackMagnet, prefs.linkageEnabled, processCanvasPointerMove]);
+  }, [clips, captions, clipRects, contentClipRects, onPatch, setSelection, selection, toggleClipSelection, onSeek, onSeekCommit, view, totalUs, canvasTopY, document, prefs.mainTrackMagnet, prefs.linkageEnabled, processCanvasPointerMove]);
 
   // Pointer capture normally keeps the gesture on canvas; window listeners are
   // a fallback for detached test surfaces and platform capture failures.
@@ -3112,9 +2868,6 @@ export function TimelinePanel({
     if (!["move", "group-move", "trim", "speed", "edge-edit", "caption-trim", "caption-move", "marquee"].includes(interaction.kind)) return;
     if (!pointerDragLiftedRef.current) return;
     let raf = 0;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveDragTargeting 由 move 分支单独依赖
-    const resolveTargetingRef = { current: resolveDragTargeting };
-    resolveTargetingRef.current = resolveDragTargeting;
     const tick = () => {
       const pointer = lastPointerRef.current;
       const step = pointer ? dragEdgeAutoScrollStep(pointer.x, canvasSize.width) : 0;
@@ -3132,44 +2885,19 @@ export function TimelinePanel({
           if (active) {
             let adjusted: TimelineInteraction = active;
             if (active.kind === "move") {
-              adjusted = {
-                ...active,
-                previewStartUs: active.previewStartUs + deltaUs,
-                targetStartUs: Math.max(0, active.targetStartUs + deltaUs),
-                startUs: active.startUs + deltaUs,
-              };
-              // 滚动改变了片段在视口中的位置：按平移后的 targetStartUs
-              // 重算落点预览，保证预览与内容点始终对齐。
-              const draggedClip = clips.find((c) => c.clip_id === active.clipId);
-              if (draggedClip) {
-                const { targetTrackId, dropHit } = resolveTargetingRef.current(
-                  adjusted as MoveInteraction,
-                );
-                const dragPlan = clipDragPlanner?.({
-                  clipIds: active.clipIds,
-                  leadClipId: active.clipId,
-                  leadStartUs: adjusted.targetStartUs,
-                  pointerTimeUs: pointer ? xToTime(pointer.x, nextView) : adjusted.targetStartUs,
-                  dropHit,
-                  targetTrackId,
-                  mode: active.moveMode,
-                  copyOnStart: active.copyOnStart,
-                  copyIds: active.copyIds,
-                  mainTrackMagnet: prefs.mainTrackMagnet,
-                  linkageEnabled: prefs.linkageEnabled,
-                  snappingEnabled: prefs.snappingEnabled,
-                  flushToleranceUs: (SNAP_PX / nextView.pixelsPerSecond) * 1_000_000,
-                }) ?? null;
-                const landed = dragPlan?.lead;
-                adjusted = {
-                  ...(adjusted as MoveInteraction),
-                  targetStartUs: landed?.startUs ?? adjusted.targetStartUs,
-                  targetTrackId: landed?.trackId ?? targetTrackId,
-                  dropHit,
-                  dragPlan,
-                  resolution: landed ? { startUs: landed.startUs, trackId: landed.trackId, mode: "free" } : null,
-                };
-              }
+              adjusted = stepAutoScrollMoveInteraction({
+                active,
+                deltaUs,
+                pointerX: pointer?.x,
+                nextView,
+                clips,
+                trackRows,
+                clipRects,
+                mainTrackMagnet: prefs.mainTrackMagnet,
+                linkageEnabled: prefs.linkageEnabled,
+                snappingEnabled: prefs.snappingEnabled,
+                clipDragPlanner,
+              });
             } else if (active.kind === "group-move") {
               const startUsByClip: Record<string, number> = {};
               const targetStartUsByClip: Record<string, number> = {};
