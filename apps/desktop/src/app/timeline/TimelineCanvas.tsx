@@ -4,13 +4,8 @@ import { ModePicker, timelineModeFromKeyEvent, type TimelineMode } from "../../u
 import { ContextMenu } from "../../ui/of/ContextMenu.js";
 import { ASSET_BATCH_DRAG, ASSET_DRAG, SYSTEM_FILE_DROP_ID, assetDropKindFromFile, clearSystemFileDrop, getActiveDraggedAssetIds, hasAssetDrag, peekSystemFileDrop, readAssetDrop, resolveTimelineAssetDropIntent, restoreSystemFileDrop, setActiveDraggedAssetIds } from "./asset-drop.js";
 import { splitClipAt, splitSelectionAt } from "./split-point.js";
-import { expandLinkedClipIds, mergeLinkedMarqueeSelection, removeLinkedClips } from "./linked-clips.js";
-import { closeGapAt } from "./close-gap.js";
-import { planCompactMainTrack, planMagneticDelete, planMagneticDrop, planMagneticMove, planMagneticTrim, planMagneticImageTrim, planRippleDelete } from "./magnetic-plan.js";
-import { createClipDragPlanner, linkedRiderClipIdsForDrag } from "./clip-drag-plan.js";
-import { hasLiftedTimelineDrag } from "./drag-threshold.js";
+import { createClipDragPlanner } from "./clip-drag-plan.js";
 import { planAdvancedEdit, type AdvancedEditMode } from "./advanced-edit.js";
-import { planTimelineSpeedEdge, speedMilliForLength } from "./speed-edge-plan.js";
 import { AudioMeters } from "../../ui/of/AudioMeters.js";
 /**
  * Timeline — Canvas + DOM hybrid timeline component.
@@ -148,6 +143,13 @@ import {
   stepClipTrimGesture,
   stepSpeedEdgeGesture,
 } from "./canvas/gestures/edge-trim-gesture.js";
+import {
+  buildGroupMovePatchOperations,
+  checkInteractionDragLifted,
+  commitMarqueeGesture,
+  stepMarqueeGesture,
+  stepScrollbarDrag,
+} from "./canvas/gestures/marquee-gesture.js";
 
 export {
   THUMB_CELL_PX,
@@ -166,60 +168,38 @@ const canChangeClipSpeed = (clip: TimelineClip): boolean =>
   && clip.source_end_us > clip.source_start_us;
 
 import {
-  MIN_CLIP_US,
   SCROLLBAR_HEIGHT_PX,
   SNAP_PX,
-  TRIM_HANDLE_PX,
-  CLIP_HEADER_H,
-  CAPTION_ROW_H,
-  clampGroupDelta,
   clampMoveStart,
   clampScrollX,
   clampTimelineZoom,
   clipAudioBand,
   clipLabelPinShift,
   timelineWheelPanDelta,
-  timelineGestureDeltaUs,
   clipDuration,
   computeTimelineTicks,
-  clipsInTimelineMarquee,
   computeClipRects,
   computeTrackRows,
   computeTransitionRects,
   computeActiveTransitionRects,
-  TRACK_VIEW_PAD,
   TRACK_SIZES,
+  TRACK_VIEW_PAD,
   dragEdgeAutoScrollStep,
   hitTestClips,
-  hitTestTransitionGap,
-  hitTestTransitions,
-  hitTestActiveTransitions,
-  hitTestTrimHandle,
-  hitTestVolumeLine,
-  marqueeRect,
-  orderedMoveSnapTargets,
-  resolveGroupMove,
-  resolveMoveTarget,
   scrollBounds,
   snapCandidates,
-  snapResult,
-  snapResultSorted,
-  snapValue,
   snapClipPaintRect,
+  snapValue,
   stepTimelineZoom,
   timeToX,
+  timelineDropHit,
   timelineSliderToZoom,
   timelineZoomAfterDurationChange,
   timelineZoomLimits,
   timelineZoomToPps,
   timelineZoomToSlider,
-  trimHitPx,
-  trackRowAt,
   trackRowOf,
-  timelineDropHit,
-  timelineDragDropExcludedClipIds,
   trackRowsTotalHeight,
-  volumeToY,
   xToTime,
   snapTimeToFrame,
   yToVolume,
@@ -2163,16 +2143,13 @@ export function TimelinePanel({
       if (active) {
         lastPointerRef.current = { x, y };
         if (!pointerDragLiftedRef.current) {
-          if (active.kind === "move" || active.kind === "group-move" || active.kind === "caption-move") {
-            if (!hasLiftedTimelineDrag("move", x - active.startX, y - active.startY)) return;
+          const lift = checkInteractionDragLifted(active, x, y, event.clientX);
+          if (lift.stillBelowThreshold) return;
+          if (lift.liftedNow) {
             pointerDragLiftedRef.current = true;
-            collapseSelectedClickRef.current = null;
-          } else if (active.kind === "marquee") {
-            if (!hasLiftedTimelineDrag("marquee", event.clientX - active.startClientX, 0)) return;
-            pointerDragLiftedRef.current = true;
-          } else if (active.kind === "trim" || active.kind === "speed" || active.kind === "edge-edit" || active.kind === "caption-trim") {
-            if (!hasLiftedTimelineDrag("edge", x - active.startX, 0)) return;
-            pointerDragLiftedRef.current = true;
+            if (active.kind === "move" || active.kind === "group-move" || active.kind === "caption-move") {
+              collapseSelectedClickRef.current = null;
+            }
           }
         }
         const pps = view.pixelsPerSecond;
@@ -2196,19 +2173,20 @@ export function TimelinePanel({
           }
         }
         if (active.kind === "scrollbar") {
-          const { maxScrollX } = scrollBounds(view, totalUs, canvasSize.width);
-          const nextScrollX = clampScrollX(active.startScrollX + (x - active.startX), maxScrollX);
+          const nextScrollX = stepScrollbarDrag({
+            startX: active.startX,
+            startScrollX: active.startScrollX,
+            x,
+            view,
+            totalUs,
+            canvasWidth: canvasSize.width,
+          });
           setView((v) => ({ ...v, scrollX: nextScrollX }));
           canvas.style.cursor = "col-resize";
           return;
         }
         if (active.kind === "marquee") {
-          // Marquee coords are content-space so auto-scroll keeps the rect anchored.
-          const next: TimelineInteraction = {
-            ...active,
-            currentX: x + view.scrollX,
-            currentY: y,
-          };
+          const next = stepMarqueeGesture(active, x, y, view.scrollX);
           interactionRef.current = next;
           setInteraction(next);
           canvas.style.cursor = "crosshair";
@@ -2496,21 +2474,11 @@ export function TimelinePanel({
           onPatch,
         });
       } else if (active.kind === "group-move") {
-        const ops: TimelinePatchOperation[] = active.clipIds
-          .map((id) => ({
-            clip: clips.find((c) => c.clip_id === id),
-            targetUs: Math.round(active.targetStartUsByClip[id] ?? 0),
-          }))
-          .filter(
-            (item): item is { clip: TimelineClip; targetUs: number } =>
-              Boolean(item.clip) &&
-              Math.abs(item.targetUs - item.clip!.timeline_start_us) >= 1000,
-          )
-          .map((item) => ({
-            op: "position_clip" as const,
-            clip_id: item.clip.clip_id,
-            timeline_start_us: item.targetUs,
-          }));
+        const ops = buildGroupMovePatchOperations({
+          clipIds: active.clipIds,
+          targetStartUsByClip: active.targetStartUsByClip,
+          clips,
+        });
         if (ops.length > 0) void onPatch(ops, "移动音频片段");
       } else if (active.kind === "volume") {
         const clip = clips.find((c) => c.clip_id === active.clipId);
@@ -2581,21 +2549,20 @@ export function TimelinePanel({
           );
         }
       } else if (active.kind === "marquee") {
-        const rect = marqueeRect(active.startX, active.startY, active.currentX, active.currentY);
-        if (pointerDragLiftedRef.current) {
-          // OpenFilm's marquee selects by horizontal time span and swept rows.
-          const hits = clipsInTimelineMarquee(rect, contentClipRects, trackRows);
-          const merged = shiftClickRef.current
-            ? mergeLinkedMarqueeSelection(selection, hits, clips)
-            : expandLinkedClipIds(hits, clips);
-          setSelection(merged.length > 0 ? { kind: "clips", ids: merged } : null);
-        } else {
-          // Plain click on empty area → move the playhead there (Round 4)，
-          // 寻址同样钳制在素材终点内。
-          const viewportX = active.currentX - view.scrollX;
-          (onSeekCommit ?? onSeek)?.(clampRulerTime(xToTime(viewportX, view)));
-          if (!shiftClickRef.current) setSelection(null);
-        }
+        commitMarqueeGesture({
+          active,
+          dragLifted: pointerDragLiftedRef.current,
+          shiftClicked: shiftClickRef.current,
+          contentClipRects,
+          trackRows,
+          clips,
+          selection,
+          view,
+          totalUs,
+          setSelection,
+          onSeekCommit,
+          onSeek,
+        });
       }
     }
     if (commit && !pointerDragLiftedRef.current && collapseSelectedClickRef.current) {
