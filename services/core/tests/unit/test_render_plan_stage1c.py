@@ -287,3 +287,74 @@ def test_unknown_duration_input_keeps_requested_preview_and_export_window(tmp_pa
         assert source["duration_us"] == 0  # 元数据仍表示未知，绝不伪造 EOF 边界。
         assert (segment["source_start_us"], segment["source_end_us"]) == (0, 1_000_000)
         assert (segment["timeline_start_us"], segment["timeline_end_us"]) == (0, 1_000_000)
+
+
+def test_compile_document_sorts_deterministically_when_order_index_missing(tmp_path: Path) -> None:
+    compiler, database, _ = _compiler(tmp_path)
+
+    def _make_doc(first_pair: list[dict]) -> dict:
+        return {
+            "schema_version": 1,
+            "project_id": "p1",
+            "canvas": {
+                "width": 1080,
+                "height": 1920,
+                "fps_num": 30,
+                "fps_den": 1,
+                "background_color": "#000000",
+            },
+            "tracks": [{"id": "V1", "kind": "visual", "locked": False}],
+            "clips": [
+                *first_pair,
+                {
+                    "clip_id": "c_next",
+                    "track_id": "V1",
+                    "asset_id": "i1",
+                    "asset_kind": "image",
+                    "source_start_us": None,
+                    "source_end_us": None,
+                    "timeline_start_us": 1_000_000,
+                    "timeline_end_us": 2_000_000,
+                    "layout": "fit",
+                    "audio": {"enabled": False, "gain_db": 0.0},
+                },
+            ],
+            "transitions": [
+                {
+                    "transition_id": "t_compat",
+                    "after_clip_id": "c_b",
+                    "incoming_clip_id": "c_next",
+                    "kind": "dissolve",
+                    "duration_us": 200_000,
+                }
+            ],
+            "captions": [],
+        }
+
+    clip_a = {
+        "clip_id": "c_a",
+        "track_id": "V1",
+        "asset_id": "v1",
+        "asset_kind": "video",
+        "source_start_us": 0,
+        "source_end_us": 1_000_000,
+        "timeline_start_us": 0,
+        "timeline_end_us": 1_000_000,
+        "layout": "fit",
+        "audio": {"enabled": True, "gain_db": 0.0},
+    }
+    clip_b = {
+        **clip_a,
+        "clip_id": "c_b",
+    }
+
+    rev_ab = _install_fixture_timeline(database, _make_doc([clip_a, clip_b]), "legacy-ab", "r1")
+    rev_ba = _install_fixture_timeline(database, _make_doc([clip_b, clip_a]), "legacy-ba", "legacy-ab")
+
+    plan_ab = compiler.compile("p1", rev_ab, "authoritative_preview")
+    plan_ba = compiler.compile("p1", rev_ba, "authoritative_preview")
+
+    assert len(plan_ab["compatibility_transitions"]) == 1
+    assert plan_ab["compatibility_transitions"] == plan_ba["compatibility_transitions"]
+    assert plan_ab["compatibility_transitions"][0]["outgoing_clip_id"] == "c_b"
+    assert plan_ab["compatibility_transitions"][0]["incoming_clip_id"] == "c_next"

@@ -377,7 +377,13 @@ class RenderPlanCompiler:
         for item in document["clips"]:
             clip_order_by_track.setdefault(str(item.get("track_id", "V1")), []).append(item)
         for values in clip_order_by_track.values():
-            values.sort(key=lambda item: (int(item["timeline_start_us"]), int(item["order_index"])))
+            values.sort(
+                key=lambda item: (
+                    int(item.get("timeline_start_us") or 0),
+                    int(item["order_index"]) if item.get("order_index") is not None else 0,
+                    str(item.get("clip_id", "")),
+                )
+            )
         compatibility_transitions: list[dict[str, Any]] = []
         transition_by_anchor: dict[str, dict[str, Any]] = {}
         for transition in document.get("transitions", []):
