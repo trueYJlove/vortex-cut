@@ -31,9 +31,14 @@ function fail(
 }
 
 function resolveTargetClips(ctx: CommandRuntimeContext, clipIds?: string[]): TimelineClip[] {
-  if (!clipIds || clipIds.length === 0) return ctx.selectedClips;
+  if (!Array.isArray(clipIds) || clipIds.length === 0) return ctx.selectedClips;
   const idSet = new Set(clipIds);
   return (ctx.working?.clips ?? []).filter(clip => idSet.has(clip.clip_id));
+}
+
+function isTimelineConflictError(error: unknown): boolean {
+  const text = errorCode(error);
+  return text.includes("TIMELINE_CONFLICT") || text.includes("TIMELINE_DRAFT_CONFLICT") || text.includes("409");
 }
 
 export async function executeTimelinePatch(
@@ -79,8 +84,7 @@ export async function executeTimelinePatch(
     if (ctx.isCurrentProject(projectId)) {
       await ctx.handleConflict(error);
     }
-    const text = errorCode(error);
-    const isConflict = text.includes("TIMELINE_CONFLICT") || text.includes("TIMELINE_DRAFT_CONFLICT") || text.includes("409");
+    const isConflict = isTimelineConflictError(error);
     return fail(
       command,
       isConflict ? "CONFLICT" : "EXECUTION_FAILED",
@@ -192,7 +196,16 @@ async function executeUndoRedo(
     return { ok: true, command, data: { revisionId: next.current_revision.timeline_revision_id } };
   } catch (error) {
     if (ctx.isCurrentProject(projectId)) await ctx.handleConflict(error);
-    return fail(command, "CONFLICT", safeErrorMessage(error, kind === "undo" ? "撤销失败" : "重做失败"), true);
+    const isConflict = isTimelineConflictError(error);
+    const fallback = isConflict
+      ? (kind === "undo" ? "时间线版本冲突，撤销失败" : "时间线版本冲突，重做失败")
+      : (kind === "undo" ? "撤销失败" : "重做失败");
+    return fail(
+      command,
+      isConflict ? "CONFLICT" : "EXECUTION_FAILED",
+      safeErrorMessage(error, fallback),
+      isConflict,
+    );
   } finally {
     ctx.undoRedoInFlightRef.current = false;
   }
@@ -252,9 +265,13 @@ export const timelineSplitCommand: CommandDefinition<TimelineSplitPayload, { rev
     },
     additionalProperties: false,
   },
-  disabledReason: ctx => {
-    if (!ctx.selectedClips.length) return "请先选择时间线片段";
-    return splitSelectionAt(ctx.selectedClips, ctx.playheadStore.get(), ctx.working).length
+  disabledReason: (ctx, payload) => {
+    const targetClips = resolveTargetClips(ctx, payload?.clipIds);
+    if (!targetClips.length) return "请先选择时间线片段";
+    const timeUs = typeof payload?.timeUs === "number" && Number.isFinite(payload.timeUs)
+      ? payload.timeUs
+      : ctx.playheadStore.get();
+    return splitSelectionAt(targetClips, timeUs, ctx.working).length
       ? undefined
       : "请把播放头移到可拆分的选中视频片段内";
   },
@@ -303,9 +320,9 @@ export const timelineCopyCommand: CommandDefinition<TimelineCopyPayload, { count
     },
     additionalProperties: false,
   },
-  disabledReason: ctx => {
+  disabledReason: (ctx, payload) => {
     if (!ctx.timeline) return "需要时间线";
-    if (ctx.selectedClips.length === 0) return "请先选择要复制的片段";
+    if (resolveTargetClips(ctx, payload?.clipIds).length === 0) return "请先选择要复制的片段";
     return undefined;
   },
   execute(ctx, payload) {
@@ -334,9 +351,10 @@ export const timelineCutCommand: CommandDefinition<TimelineCutPayload, { count: 
     },
     additionalProperties: false,
   },
-  disabledReason: ctx => {
+  disabledReason: (ctx, payload) => {
     if (!ctx.timeline) return "需要时间线";
-    if (ctx.selectedClips.length === 0 && !ctx.selectedCaption) return "请先选择要剪切的片段";
+    const targetClips = resolveTargetClips(ctx, payload?.clipIds);
+    if (targetClips.length === 0 && !ctx.selectedCaption) return "请先选择要剪切的片段";
     return undefined;
   },
   async execute(ctx, payload) {
@@ -405,7 +423,10 @@ export const timelinePasteCommand: CommandDefinition<TimelinePastePayload, { cou
     if (!ctx.areClipboardAssetsInsertable(ctx.clipboardClips)) {
       return fail("timeline.paste", "ASSET_UNAVAILABLE", "部分素材不可用或类型不支持粘贴");
     }
-    const targetUs = typeof payload?.timeUs === "number" ? payload.timeUs : ctx.playhead;
+    if (payload?.timeUs !== undefined && (typeof payload.timeUs !== "number" || !Number.isFinite(payload.timeUs) || payload.timeUs < 0)) {
+      return fail("timeline.paste", "INVALID_PAYLOAD", "timeUs 必须为非负有限数值");
+    }
+    const targetUs = payload?.timeUs ?? ctx.playheadStore.get();
     const atHead = ctx.visualClips.findIndex(c => targetUs >= c.timeline_start_us && targetUs < c.timeline_end_us);
     const pasteIndex = atHead >= 0
       ? atHead + 1
@@ -452,9 +473,11 @@ export const timelineDeleteCommand: CommandDefinition<TimelineDeletePayload, { d
     },
     additionalProperties: false,
   },
-  disabledReason: ctx => {
+  disabledReason: (ctx, payload) => {
     if (!ctx.timeline) return "需要时间线";
-    if (ctx.selectedClips.length === 0 && !ctx.selectedCaption) return "请先选择要删除的对象";
+    const targetClips = resolveTargetClips(ctx, payload?.clipIds);
+    const targetCaptionId = payload?.captionId ?? ctx.selectedCaption?.caption_id;
+    if (targetClips.length === 0 && !targetCaptionId) return "请先选择要删除的对象";
     return undefined;
   },
   async execute(ctx, payload) {
@@ -533,7 +556,13 @@ export const timelineAddCaptionCommand: CommandDefinition<TimelineAddCaptionPayl
   async execute(ctx, payload) {
     if (!ctx.project) return fail("timeline.addCaption", "PROJECT_REQUIRED", "需要项目");
     if (!ctx.timeline) return fail("timeline.addCaption", "TIMELINE_REQUIRED", "需要时间线");
-    const startUs = Math.max(0, Math.round(payload?.startUs ?? ctx.playhead));
+    if (
+      (payload?.startUs !== undefined && (typeof payload.startUs !== "number" || !Number.isFinite(payload.startUs)))
+      || (payload?.endUs !== undefined && (typeof payload.endUs !== "number" || !Number.isFinite(payload.endUs)))
+    ) {
+      return fail("timeline.addCaption", "INVALID_PAYLOAD", "字幕时间参数无效");
+    }
+    const startUs = Math.max(0, Math.round(payload?.startUs ?? ctx.playheadStore.get()));
     const endUs = Math.round(payload?.endUs ?? startUs + 3_000_000);
     if (endUs <= startUs) {
       return fail("timeline.addCaption", "INVALID_PAYLOAD", "字幕结束时间必须大于开始时间");
@@ -574,8 +603,26 @@ export const timelineImportCaptionsCommand: CommandDefinition<TimelineImportCapt
   async execute(ctx, payload) {
     if (!ctx.project) return fail("timeline.importCaptions", "PROJECT_REQUIRED", "需要项目");
     if (!ctx.timeline) return fail("timeline.importCaptions", "TIMELINE_REQUIRED", "需要时间线");
+    if (typeof payload?.fileName !== "string" || !payload.fileName.trim()) {
+      return fail("timeline.importCaptions", "INVALID_PAYLOAD", "字幕文件名无效");
+    }
     if (!Array.isArray(payload?.entries)) {
       return fail("timeline.importCaptions", "INVALID_PAYLOAD", "字幕条目格式无效");
+    }
+    const hasInvalidEntry = payload.entries.some(
+      entry =>
+        !entry
+        || typeof entry !== "object"
+        || Array.isArray(entry)
+        || typeof entry.start_us !== "number"
+        || !Number.isFinite(entry.start_us)
+        || typeof entry.end_us !== "number"
+        || !Number.isFinite(entry.end_us)
+        || entry.end_us <= entry.start_us
+        || typeof entry.text !== "string",
+    );
+    if (hasInvalidEntry) {
+      return fail("timeline.importCaptions", "INVALID_PAYLOAD", "字幕条目字段无效");
     }
     const replaceExisting = payload.replaceExisting ?? (ctx.working?.captions ?? []).some(caption => caption.origin === "user");
     const res = await executeTimelinePatch(ctx, {

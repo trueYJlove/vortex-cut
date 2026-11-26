@@ -489,4 +489,163 @@ describe("Editor Command Layer", () => {
       message: "空时间线不可导出",
     });
   });
+
+  it("allows explicit clipIds/timeUs/captionId payloads when UI selection is empty while preserving UI disabledReason", async () => {
+    const clipboard: ClipboardClipSnapshot[] = [];
+    const playheadStore = createPlayheadStore();
+    playheadStore.set(0);
+    const ctx = makeContext({
+      selectedClips: [],
+      selectedCaption: undefined,
+      playhead: 0,
+      playheadStore,
+      clipboardClips: clipboard,
+      setClipboardClips: next => {
+        clipboard.splice(0, clipboard.length, ...next);
+      },
+    });
+    const dispatcher = createEditorCommandDispatcher(() => ctx);
+
+    // Without explicit payload, UI disabledReason messages stay intact
+    expect(dispatcher.disabledReason("timeline.split")).toBe("请先选择时间线片段");
+    expect(dispatcher.disabledReason("timeline.copy")).toBe("请先选择要复制的片段");
+    expect(dispatcher.disabledReason("timeline.cut")).toBe("请先选择要剪切的片段");
+    expect(dispatcher.disabledReason("timeline.delete")).toBe("请先选择要删除的对象");
+
+    // With explicit payload, disabledReason clears and dispatch executes
+    expect(dispatcher.disabledReason("timeline.split", { clipIds: ["clip_1"], timeUs: 2_000_000 })).toBeUndefined();
+    expect(dispatcher.disabledReason("timeline.copy", { clipIds: ["clip_1"] })).toBeUndefined();
+    expect(dispatcher.disabledReason("timeline.cut", { clipIds: ["clip_1"] })).toBeUndefined();
+    expect(dispatcher.disabledReason("timeline.delete", { clipIds: ["clip_1"] })).toBeUndefined();
+    expect(dispatcher.disabledReason("timeline.delete", { captionId: "caption_1" })).toBeUndefined();
+
+    const splitRes = await dispatcher.dispatch<{ revisionId: string; operationCount: number }>("timeline.split", {
+      clipIds: ["clip_1"],
+      timeUs: 2_000_000,
+    });
+    expect(splitRes.ok).toBe(true);
+    expect(window.desktop.patchTimeline).toHaveBeenLastCalledWith(expect.objectContaining({
+      patch: expect.objectContaining({
+        operations: [expect.objectContaining({ op: "split_clip", clip_id: "clip_1", source_time_us: 2_000_000 })],
+      }),
+    }));
+
+    const copyRes = await dispatcher.dispatch<{ count: number }>("timeline.copy", { clipIds: ["clip_1"] });
+    expect(copyRes).toEqual({
+      ok: true,
+      command: "timeline.copy",
+      data: expect.objectContaining({ count: 1 }),
+    });
+
+    const cutRes = await dispatcher.dispatch<{ count: number; deletedOperations: number }>("timeline.cut", {
+      clipIds: ["clip_1"],
+    });
+    expect(cutRes.ok).toBe(true);
+    if (cutRes.ok) {
+      expect(cutRes.data.count).toBe(1);
+      expect(cutRes.data.deletedOperations).toBeGreaterThanOrEqual(1);
+    }
+
+    const delClipRes = await dispatcher.dispatch<{ deletedCount: number }>("timeline.delete", {
+      clipIds: ["clip_1"],
+    });
+    expect(delClipRes.ok).toBe(true);
+
+    const delCaptionRes = await dispatcher.dispatch<{ deletedCount: number }>("timeline.delete", {
+      captionId: "caption_1",
+    });
+    expect(delCaptionRes.ok).toBe(true);
+    expect(window.desktop.patchTimeline).toHaveBeenLastCalledWith(expect.objectContaining({
+      patch: expect.objectContaining({
+        operations: [{ op: "remove_caption", caption_id: "caption_1" }],
+      }),
+    }));
+  });
+
+  it("returns COMMAND_NOT_FOUND for unknown commands and validates playheadStore, paste, importCaptions, and undo/redo errors", async () => {
+    const unknownRes = await createEditorCommandDispatcher(() => makeContext()).dispatch("timeline.doesNotExist", {});
+    expect(unknownRes).toEqual({
+      ok: false,
+      command: "timeline.doesNotExist",
+      code: "COMMAND_NOT_FOUND",
+      message: "未知命令",
+    });
+
+    // paste & addCaption read live playheadStore.get() instead of stale ctx.playhead
+    const playheadStore = createPlayheadStore();
+    playheadStore.set(0);
+    const clip = makeClip({ timeline_start_us: 2_000_000, timeline_end_us: 6_000_000 });
+    const timeline = makeTimelineState({ clips: [clip] });
+    const ctx = makeContext({
+      timeline,
+      working: timeline.current_revision.document,
+      visualClips: [clip],
+      playhead: 0,
+      playheadStore,
+      clipboardClips: [{
+        asset_id: clip.asset_id,
+        asset_kind: "video",
+        source_start_us: 0,
+        source_end_us: 6_000_000,
+        speed_milli: 1000,
+        reverse_playback: false,
+        layout: "fit",
+      }],
+    });
+    const dispatcher = createEditorCommandDispatcher(() => ctx);
+
+    playheadStore.set(3_500_000);
+    const pasteDefaultRes = await dispatcher.dispatch<{ atIndex: number }>("timeline.paste", {});
+    expect(pasteDefaultRes).toEqual({
+      ok: true,
+      command: "timeline.paste",
+      data: { count: 1, atIndex: 1, revisionId: "rev_2" },
+    });
+
+    const badPasteRes = await dispatcher.dispatch("timeline.paste", { timeUs: -1 });
+    expect(badPasteRes.ok).toBe(false);
+    if (!badPasteRes.ok) expect(badPasteRes.code).toBe("INVALID_PAYLOAD");
+
+    const badPasteTypeRes = await dispatcher.dispatch("timeline.paste", { timeUs: "100" as unknown as number });
+    expect(badPasteTypeRes.ok).toBe(false);
+    if (!badPasteTypeRes.ok) expect(badPasteTypeRes.code).toBe("INVALID_PAYLOAD");
+
+    const addCaptionDefaultRes = await dispatcher.dispatch<{ startUs: number; endUs: number }>("timeline.addCaption", {});
+    expect(addCaptionDefaultRes).toEqual({
+      ok: true,
+      command: "timeline.addCaption",
+      data: { revisionId: "rev_2", startUs: 3_500_000, endUs: 6_500_000 },
+    });
+
+    // importCaptions invalid fileName and invalid entries
+    for (const badImport of [
+      { fileName: "", entries: [{ start_us: 0, end_us: 1_000_000, text: "ok" }] },
+      { fileName: "   ", entries: [{ start_us: 0, end_us: 1_000_000, text: "ok" }] },
+      { fileName: "demo.srt", entries: [{ start_us: 2_000_000, end_us: 1_000_000, text: "bad range" }] },
+      { fileName: "demo.srt", entries: [{ start_us: 1_000_000, end_us: 1_000_000, text: "zero length" }] },
+      { fileName: "demo.srt", entries: [{ start_us: 0, end_us: 1_000_000, text: 123 as unknown as string }] },
+      { fileName: "demo.srt", entries: [null as unknown as { start_us: number; end_us: number; text: string }] },
+    ]) {
+      const res = await dispatcher.dispatch("timeline.importCaptions", badImport);
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.code).toBe("INVALID_PAYLOAD");
+    }
+
+    // executeUndoRedo error classification: CONFLICT (retryable: true) vs EXECUTION_FAILED (retryable: falsy)
+    (window.desktop.undoTimeline as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("[TIMELINE_CONFLICT] version mismatch"));
+    const undoConflict = await dispatcher.dispatch("timeline.undo", {});
+    expect(undoConflict.ok).toBe(false);
+    if (!undoConflict.ok) {
+      expect(undoConflict.code).toBe("CONFLICT");
+      expect(undoConflict.retryable).toBe(true);
+    }
+
+    (window.desktop.redoTimeline as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("500 INTERNAL_ERROR"));
+    const redoFailed = await dispatcher.dispatch("timeline.redo", {});
+    expect(redoFailed.ok).toBe(false);
+    if (!redoFailed.ok) {
+      expect(redoFailed.code).toBe("EXECUTION_FAILED");
+      expect(redoFailed.retryable).toBeFalsy();
+    }
+  });
 });

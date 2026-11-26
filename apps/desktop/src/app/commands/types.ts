@@ -53,6 +53,7 @@ export type EditorCommandErrorCode =
   | "TIMELINE_EMPTY"
   | "IN_FLIGHT"
   | "CANCELLED"
+  | "COMMAND_NOT_FOUND"
   | "COMMAND_DISABLED"
   | "EXECUTION_FAILED";
 
@@ -197,6 +198,6 @@ export interface CommandDefinition<TPayload = Record<string, unknown>, TData = R
   /** Whether this command operates purely on serializable domain data and is a candidate for MCP tool exposure. */
   mcpExpose: boolean;
   inputSchema: JsonSchemaObject;
-  disabledReason?: (ctx: CommandRuntimeContext) => string | undefined;
+  disabledReason?: (ctx: CommandRuntimeContext, payload?: TPayload) => string | undefined;
   execute: (ctx: CommandRuntimeContext, payload: TPayload) => Promise<CommandResult<TData>> | CommandResult<TData>;
 }

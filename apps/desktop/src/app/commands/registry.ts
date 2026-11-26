@@ -58,10 +58,10 @@ export function isPlainJsonSerializable(value: unknown, seen = new WeakSet<objec
 }
 
 export function createEditorCommandDispatcher(getContext: () => CommandRuntimeContext) {
-  const disabledReason = (id: string): string | undefined => {
+  const disabledReason = (id: string, payload?: Record<string, unknown>): string | undefined => {
     const command = commandRegistryMap.get(id);
     if (!command) return "未知命令";
-    return command.disabledReason?.(getContext());
+    return command.disabledReason?.(getContext(), payload);
   };
 
   const dispatch = async <TData = Record<string, unknown>>(
@@ -70,13 +70,13 @@ export function createEditorCommandDispatcher(getContext: () => CommandRuntimeCo
   ): Promise<CommandResult<TData>> => {
     const command = commandRegistryMap.get(id);
     if (!command) {
-      return { ok: false, command: id, code: "COMMAND_DISABLED", message: "未知命令" };
+      return { ok: false, command: id, code: "COMMAND_NOT_FOUND", message: "未知命令" };
     }
     if (!isPlainJsonSerializable(payload)) {
       return { ok: false, command: id, code: "INVALID_PAYLOAD", message: "命令入参必须是纯 JSON 可序列化数据" };
     }
     const ctx = getContext();
-    const blockedReason = command.disabledReason?.(ctx);
+    const blockedReason = command.disabledReason?.(ctx, payload);
     if (blockedReason) {
       return { ok: false, command: id, code: "COMMAND_DISABLED", message: blockedReason };
     }

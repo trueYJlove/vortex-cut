@@ -103,6 +103,8 @@ app.whenReady().then(async () => {
   app.exit(1);
 });
 
+let shuttingDown = false;
+
 app.on("window-all-closed", () => {
   void appendLog(logPath, "window-all-closed");
   if (process.platform === "darwin") return;
@@ -112,10 +114,9 @@ app.on("window-all-closed", () => {
   if (!shuttingDown) app.quit();
 });
 app.on("quit", (_event, code) => { void appendLog(logPath, `app quit code=${code}`); });
-app.on("before-quit", () => { void appendLog(logPath, "before-quit event"); });
 app.on("will-quit", () => { void appendLog(logPath, "will-quit event"); });
-let shuttingDown = false;
 app.on("before-quit", event => {
+  void appendLog(logPath, "before-quit event");
   if (shuttingDown) return;
   event.preventDefault();
   shuttingDown = true;
