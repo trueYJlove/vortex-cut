@@ -140,6 +140,14 @@ import {
   stepMoveGesture,
   type MoveSnapTargetCache,
 } from "./canvas/gestures/move-gesture.js";
+import {
+  commitClipTrimGesture,
+  stepAdvancedEdgeEdit,
+  stepCaptionMoveGesture,
+  stepCaptionTrimGesture,
+  stepClipTrimGesture,
+  stepSpeedEdgeGesture,
+} from "./canvas/gestures/edge-trim-gesture.js";
 
 export {
   THUMB_CELL_PX,
@@ -2249,223 +2257,72 @@ export function TimelinePanel({
           return;
         }
         if (active.kind === "edge-edit") {
-          const rawDeltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-          let requestedDeltaUs = rawDeltaUs;
-          let snapUs: number | null = null;
-          if (active.mode !== "slip" && prefs.snappingEnabled) {
-            const originClipId = active.mode === "roll" ? active.clipIds[0] : active.clipIds[1];
-            const originClip = clips.find(clip => clip.clip_id === originClipId);
-            if (originClip) {
-              const originUs = active.mode === "roll" ? originClip.timeline_end_us : originClip.timeline_start_us;
-              const candidates = [
-                ...snapCandidates(clipRects, activePlayheadStore.get(), new Set(active.clipIds)),
-                ...markers.map(marker => marker.timeUs),
-              ];
-              const snapped = snapValue(originUs + rawDeltaUs, candidates, (SNAP_PX / pps) * 1_000_000);
-              requestedDeltaUs = snapped - originUs;
-              if (Math.abs(snapped - (originUs + rawDeltaUs)) > 1) snapUs = snapped;
-            }
-          }
-          const plan = getAdvancedEditPlan(active.mode, active.clipIds, requestedDeltaUs);
-          if (!plan || plan.reason) {
-            setToolbarFeedback(plan?.reason ?? "编辑无法完成");
+          const result = stepAdvancedEdgeEdit({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            frameUs,
+            snappingEnabled: prefs.snappingEnabled,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+            getAdvancedEditPlan,
+          });
+          if ("blockedReason" in result) {
+            setToolbarFeedback(result.blockedReason);
             return;
           }
-          const next: TimelineInteraction = { ...active, deltaUs: plan.deltaUs, targets: plan.targets, operations: plan.operations,
-            snapUs: snapUs !== null && Math.abs(plan.deltaUs - requestedDeltaUs) < frameUs ? snapUs : null };
-          interactionRef.current = next;
-          setInteraction(next);
-          const label = active.mode === "roll" ? "滚动修剪" : active.mode === "slip" ? "滑移素材" : "滑动片段";
-          setToolbarFeedback(`${label} ${plan.deltaUs >= 0 ? "+" : "−"}${Math.abs(plan.deltaUs / 1_000_000).toFixed(2)} 秒`);
+          interactionRef.current = result.interaction;
+          setInteraction(result.interaction);
+          setToolbarFeedback(result.feedback);
           canvas.style.cursor = "ew-resize";
           return;
         }
         if (active.kind === "speed") {
-          const clip = clips.find(item => item.clip_id === active.clipId);
-          if (!clip || !canChangeClipSpeed(clip) || !document) return;
-          const mainRipple = prefs.mainTrackMagnet && clip.track_id === "V1" && clip.asset_kind === "video";
-          const effectiveEdge: TrimEdge = mainRipple ? "right" : active.edge;
-          const pointerDeltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-          const effectiveDeltaUs = mainRipple && active.edge === "left" ? -pointerDeltaUs : pointerDeltaUs;
-          const originalEdgeUs = effectiveEdge === "left" ? active.originalTimelineStartUs : active.originalTimelineEndUs;
-          const rawEdgeUs = originalEdgeUs + effectiveDeltaUs;
-          const movingIds = new Set(active.linkedClipIds);
-          const candidates = prefs.snappingEnabled
-            ? [...snapCandidates(clipRects, activePlayheadStore.get(), movingIds), ...markers.map(marker => marker.timeUs)]
-              .filter(candidate => Math.abs(candidate - originalEdgeUs) >= 1_000)
-            : [];
-          const snappedEdgeUs = snapValue(rawEdgeUs, candidates, (SNAP_PX / pps) * 1_000_000);
-          const didSnap = Math.abs(snappedEdgeUs - rawEdgeUs) > 1;
-          let targetEdgeUs = didSnap ? snappedEdgeUs : snapTimeToFrame(rawEdgeUs, fpsNum, fpsDen);
-          if (!mainRipple) {
-            const groupIds = new Set(active.linkedClipIds);
-            const neighbors = clips.filter(item => item.track_id === clip.track_id && !groupIds.has(item.clip_id));
-            if (effectiveEdge === "left") {
-              const previousEnd = Math.max(0, ...neighbors.filter(item => item.timeline_end_us <= active.originalTimelineStartUs).map(item => item.timeline_end_us));
-              targetEdgeUs = Math.max(previousEnd, Math.min(active.originalTimelineEndUs - 1, targetEdgeUs));
-            } else {
-              const nextStart = Math.min(Number.MAX_SAFE_INTEGER, ...neighbors.filter(item => item.timeline_start_us >= active.originalTimelineEndUs).map(item => item.timeline_start_us));
-              targetEdgeUs = Math.max(active.originalTimelineStartUs + 1, Math.min(nextStart, targetEdgeUs));
-            }
-          }
-          const targetLengthUs = effectiveEdge === "left"
-            ? active.originalTimelineEndUs - targetEdgeUs
-            : targetEdgeUs - active.originalTimelineStartUs;
-          const sourceDurationUs = clip.source_end_us! - clip.source_start_us!;
-          const edgeHeld = Math.abs(targetEdgeUs - snapTimeToFrame(rawEdgeUs, fpsNum, fpsDen)) >= 0.5;
-          const requestedSpeedMilli = speedMilliForLength(sourceDurationUs, targetLengthUs, didSnap || edgeHeld);
-          const plan = planTimelineSpeedEdge(document, clip, requestedSpeedMilli, active.edge, prefs.mainTrackMagnet, prefs.linkageEnabled, active.ignoreLink);
-          if (plan.reason) {
-            const reset: TimelineInteraction = {
-              ...active,
-              targetSpeedMilli: active.originalSpeedMilli,
-              targetTimelineStartUs: active.originalTimelineStartUs,
-              targetTimelineEndUs: active.originalTimelineEndUs,
-              targets: [],
-              operations: [],
-              snapUs: null,
-            };
-            interactionRef.current = reset;
-            setInteraction(reset);
-            setToolbarFeedback(plan.reason);
+          const result = stepSpeedEdgeGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            fpsNum,
+            fpsDen,
+            frameUs,
+            snappingEnabled: prefs.snappingEnabled,
+            mainTrackMagnet: prefs.mainTrackMagnet,
+            linkageEnabled: prefs.linkageEnabled,
+            document,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+          });
+          if (result) {
+            interactionRef.current = result.interaction;
+            setInteraction(result.interaction);
+            setToolbarFeedback(result.feedback);
+            if (!result.invalid) canvas.style.cursor = "ew-resize";
             return;
           }
-          const lead = plan.targets.find(item => item.clipId === active.clipId);
-          if (!lead && plan.operations.length) return;
-          const landedEdgeUs = lead
-            ? effectiveEdge === "left" ? lead.startUs : lead.endUs
-            : originalEdgeUs;
-          const snapUs = didSnap && Math.abs(landedEdgeUs - snappedEdgeUs) <= frameUs / 2 ? snappedEdgeUs : null;
-          const next: TimelineInteraction = {
-            ...active,
-            targetSpeedMilli: plan.speedMilli,
-            targetTimelineStartUs: lead?.startUs ?? active.originalTimelineStartUs,
-            targetTimelineEndUs: lead?.endUs ?? active.originalTimelineEndUs,
-            targets: plan.targets,
-            operations: plan.operations,
-            snapUs,
-          };
-          interactionRef.current = next;
-          setInteraction(next);
-          setToolbarFeedback(`${(plan.speedMilli / 1_000).toFixed(2)}x`);
-          canvas.style.cursor = "ew-resize";
-          return;
         }
         if (active.kind === "trim") {
-          const clip = clips.find((c) => c.clip_id === active.clipId);
-          if (clip) {
-            const deltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-            const threshold = (SNAP_PX / pps) * 1_000_000;
-            const movingIds = new Set(active.linkedClipIds);
-            const originalEdgeUs = active.edge === "left" ? clip.timeline_start_us : clip.timeline_end_us;
-            const candidates = prefs.snappingEnabled
-              ? [
-                  ...snapCandidates(clipRects, activePlayheadStore.get(), movingIds),
-                  ...markers.map(marker => marker.timeUs),
-                ].filter(candidate => Math.abs(candidate - originalEdgeUs) >= 1000)
-              : [];
-            const rawEdgeUs = originalEdgeUs + deltaUs;
-            const snappedEdgeUs = snapValue(rawEdgeUs, candidates, threshold);
-            const snapped = Math.abs(snappedEdgeUs - rawEdgeUs) > 1;
-            const desiredEdgeUs = snapped ? snappedEdgeUs : snapTimeToFrame(rawEdgeUs, fpsNum, fpsDen);
-            if (clip.asset_kind === "image") {
-              let lowerDeltaUs = -Number.MAX_SAFE_INTEGER;
-              let upperDeltaUs = Number.MAX_SAFE_INTEGER;
-              const mainMagnetRipple = prefs.mainTrackMagnet && clip.track_id === "V1";
-              for (const memberId of active.linkedClipIds) {
-                const member = clips.find(item => item.clip_id === memberId);
-                if (!member) continue;
-                const durationUs = member.timeline_end_us - member.timeline_start_us;
-                const minimumLengthUs = MIN_CLIP_US;
-                if (active.edge === "left") {
-                  lowerDeltaUs = Math.max(lowerDeltaUs, -member.timeline_start_us);
-                  upperDeltaUs = Math.min(upperDeltaUs, durationUs - minimumLengthUs);
-                  if (!mainMagnetRipple) for (const other of clips) {
-                    if (other.track_id === member.track_id && !movingIds.has(other.clip_id) && other.timeline_start_us < member.timeline_start_us) {
-                      lowerDeltaUs = Math.max(lowerDeltaUs, Math.min(other.timeline_end_us, member.timeline_start_us) - member.timeline_start_us);
-                    }
-                  }
-                } else {
-                  lowerDeltaUs = Math.max(lowerDeltaUs, minimumLengthUs - durationUs);
-                  if (!mainMagnetRipple) for (const other of clips) {
-                    if (other.track_id === member.track_id && !movingIds.has(other.clip_id) && other.timeline_start_us >= member.timeline_end_us) {
-                      upperDeltaUs = Math.min(upperDeltaUs, Math.max(other.timeline_start_us, member.timeline_end_us) - member.timeline_end_us);
-                    }
-                  }
-                }
-              }
-              const edgeDeltaUs = Math.max(lowerDeltaUs, Math.min(upperDeltaUs, desiredEdgeUs - originalEdgeUs));
-              const targetTimelineEdgeUs = originalEdgeUs + edgeDeltaUs;
-              const next: TimelineInteraction = {
-                ...active,
-                targetTimelineStartUs: active.edge === "left" ? targetTimelineEdgeUs : active.originalTimelineStartUs,
-                targetTimelineEndUs: active.edge === "right" ? targetTimelineEdgeUs : active.originalTimelineEndUs,
-                snapUs: snapped && Math.abs(targetTimelineEdgeUs - snappedEdgeUs) <= 1 ? snappedEdgeUs : null,
-              };
-              interactionRef.current = next;
-              setInteraction(next);
-              canvas.style.cursor = "ew-resize";
-              return;
-            }
-            let lowerDeltaUs = -Number.MAX_SAFE_INTEGER;
-            let upperDeltaUs = Number.MAX_SAFE_INTEGER;
-            const mainMagnetRipple = prefs.mainTrackMagnet && clip.track_id === "V1";
-            for (const memberId of active.linkedClipIds) {
-              const member = clips.find(item => item.clip_id === memberId);
-              if (!member) continue;
-              const durationUs = member.timeline_end_us - member.timeline_start_us;
-              const speed = Math.max(1, member.speed_milli ?? 1000);
-              const sourceToTimeline = (sourceUs: number) => member.asset_kind !== "image"
-                ? Math.round(sourceUs * 1000 / speed)
-                : sourceUs;
-              const minimumLengthUs = MIN_CLIP_US;
-              if (active.edge === "left") {
-                lowerDeltaUs = Math.max(lowerDeltaUs, -member.timeline_start_us, -sourceToTimeline(member.source_start_us ?? 0));
-                upperDeltaUs = Math.min(upperDeltaUs, durationUs - minimumLengthUs);
-                if (!mainMagnetRipple) {
-                  for (const other of clips) {
-                    if (other.track_id !== member.track_id || movingIds.has(other.clip_id)) continue;
-                    if (other.timeline_start_us < member.timeline_start_us) {
-                      const fence = Math.min(other.timeline_end_us, member.timeline_start_us);
-                      lowerDeltaUs = Math.max(lowerDeltaUs, fence - member.timeline_start_us);
-                    }
-                  }
-                }
-              } else {
-                lowerDeltaUs = Math.max(lowerDeltaUs, minimumLengthUs - durationUs);
-                const sourceDurationUs = assetDurationById.get(member.asset_id) ?? Number.MAX_SAFE_INTEGER;
-                upperDeltaUs = Math.min(upperDeltaUs, sourceToTimeline(Math.max(0, sourceDurationUs - (member.source_end_us ?? sourceDurationUs))));
-                if (!mainMagnetRipple) {
-                  for (const other of clips) {
-                    if (other.track_id !== member.track_id || movingIds.has(other.clip_id)) continue;
-                    if (other.timeline_start_us >= member.timeline_end_us) {
-                      const fence = Math.max(other.timeline_start_us, member.timeline_end_us);
-                      upperDeltaUs = Math.min(upperDeltaUs, fence - member.timeline_end_us);
-                    }
-                  }
-                }
-              }
-            }
-            const edgeDeltaUs = Math.max(lowerDeltaUs, Math.min(upperDeltaUs, desiredEdgeUs - originalEdgeUs));
-            const targetTimelineEdgeUs = originalEdgeUs + edgeDeltaUs;
-            const sourceDeltaUs = Math.round(edgeDeltaUs * Math.max(1, clip.speed_milli ?? 1000) / 1000);
-            let targetStartUs = active.targetStartUs;
-            let targetEndUs = active.targetEndUs;
-            let snapUs: number | null = null;
-            if (active.edge === "left") {
-              targetStartUs = Math.max(0, active.originalStartUs + sourceDeltaUs);
-              targetEndUs = active.originalEndUs;
-            } else {
-              targetStartUs = active.originalStartUs;
-              targetEndUs = Math.max(targetStartUs + MIN_CLIP_US, active.originalEndUs + sourceDeltaUs);
-            }
-            if (snapped && Math.abs(targetTimelineEdgeUs - snappedEdgeUs) <= 1) snapUs = snappedEdgeUs;
-            const next: TimelineInteraction = {
-              ...active,
-              targetStartUs,
-              targetEndUs,
-              snapUs,
-            };
+          const next = stepClipTrimGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            fpsNum,
+            fpsDen,
+            snappingEnabled: prefs.snappingEnabled,
+            mainTrackMagnet: prefs.mainTrackMagnet,
+            clips,
+            clipRects,
+            playheadUs: activePlayheadStore.get(),
+            markers,
+            assetDurationById,
+          });
+          if (next) {
             interactionRef.current = next;
             setInteraction(next);
             canvas.style.cursor = "ew-resize";
@@ -2473,27 +2330,14 @@ export function TimelinePanel({
           }
         }
         if (active.kind === "caption-trim") {
-          // B4：字幕端点拖拽。约束：≥200ms（MIN_CAPTION_US）、
-          // 与相邻字幕不重叠（按时间排序取近邻边界）。
-          const caption = captions.find((c) => c.caption_id === active.captionId);
-          if (caption) {
-            const deltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-            const sorted = [...captions].sort((a, b) => a.start_us - b.start_us);
-            const idx = sorted.findIndex((c) => c.caption_id === active.captionId);
-            const prev = idx > 0 ? sorted[idx - 1] : null;
-            const nextCap = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
-            let targetStartUs = active.targetStartUs;
-            let targetEndUs = active.targetEndUs;
-            if (active.edge === "left") {
-              const upper = active.originalEndUs - MIN_CAPTION_US;
-              const lower = Math.max(0, prev ? prev.end_us : 0);
-              targetStartUs = Math.max(lower, Math.min(upper, active.originalStartUs + deltaUs));
-            } else {
-              const lower = active.originalStartUs + MIN_CAPTION_US;
-              const upper = nextCap ? nextCap.start_us : Number.MAX_SAFE_INTEGER;
-              targetEndUs = Math.max(lower, Math.min(upper, active.originalEndUs + deltaUs));
-            }
-            const next: TimelineInteraction = { ...active, targetStartUs, targetEndUs };
+          const next = stepCaptionTrimGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            captions,
+          });
+          if (next) {
             interactionRef.current = next;
             setInteraction(next);
             canvas.style.cursor = "ew-resize";
@@ -2501,26 +2345,14 @@ export function TimelinePanel({
           }
         }
         if (active.kind === "caption-move") {
-          // B4 追加：字幕整体平移。约束：与相邻字幕不重叠（保持原时长）。
-          const caption = captions.find((c) => c.caption_id === active.captionId);
-          if (caption) {
-            const deltaUs = timelineGestureDeltaUs(x, active.startX, viewRef.current.scrollX, active.startScrollX, pps);
-            const durationUs = active.originalEndUs - active.originalStartUs;
-            const sorted = [...captions].sort((a, b) => a.start_us - b.start_us);
-            const idx = sorted.findIndex((c) => c.caption_id === active.captionId);
-            const prev = idx > 0 ? sorted[idx - 1] : null;
-            const nextCap = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
-            const targetStartUs = Math.max(
-              0,
-              Math.max(prev ? prev.end_us : 0,
-                Math.min(active.originalStartUs + deltaUs,
-                  (nextCap ? nextCap.start_us : Number.MAX_SAFE_INTEGER) - durationUs)),
-            );
-            const next: TimelineInteraction = {
-              ...active,
-              targetStartUs,
-              targetEndUs: targetStartUs + durationUs,
-            };
+          const next = stepCaptionMoveGesture({
+            active,
+            x,
+            scrollX: viewRef.current.scrollX,
+            pixelsPerSecond: pps,
+            captions,
+          });
+          if (next) {
             interactionRef.current = next;
             setInteraction(next);
             canvas.style.cursor = "grabbing";
@@ -2707,35 +2539,16 @@ export function TimelinePanel({
           setToolbarFeedback(`速度已提交 · ${(active.targetSpeedMilli / 1_000).toFixed(2)}x`);
         }
       } else if (active.kind === "trim") {
-        const clip = clips.find((c) => c.clip_id === active.clipId);
-        if (clip?.asset_kind === "image") {
-          const edgeDeltaUs = active.edge === "left"
-            ? active.targetTimelineStartUs - active.originalTimelineStartUs
-            : active.targetTimelineEndUs - active.originalTimelineEndUs;
-          if (Math.abs(edgeDeltaUs) >= 1000 && document) {
-            const magnetic = prefs.mainTrackMagnet && clip.track_id === "V1";
-            const plan = planMagneticImageTrim(document, clip, active.edge, Math.round(edgeDeltaUs), prefs.linkageEnabled, magnetic, active.ignoreLink);
-            if (!plan.operations.length) setToolbarFeedback(plan.reason ?? "图片修剪无法完成");
-            else void onPatch(plan.operations, magnetic ? "主轨磁吸修剪" : "修剪图片");
-          }
-          return;
-        }
-        const startChanged = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
-        const endChanged = Math.abs(active.targetEndUs - active.originalEndUs) >= 1000;
-        if (clip && (startChanged || endChanged)) {
-            const operations: TimelinePatchOperation[] = [{
-              op: "trim_clip",
-              clip_id: clip.clip_id,
-              source_start_us: Math.round(active.targetStartUs),
-              source_end_us: Math.round(active.targetEndUs),
-              ...(active.ignoreLink ? { ignore_link: true } : {}),
-            }];
-          if (prefs.mainTrackMagnet && clip.track_id === "V1" && document) {
-            const plan = planMagneticTrim(document, clip, Math.round(active.targetStartUs), Math.round(active.targetEndUs), prefs.linkageEnabled, active.ignoreLink);
-            if (!plan.operations.length) setToolbarFeedback(plan.reason ?? "磁吸修剪无法完成");
-            else void onPatch(plan.operations, "主轨磁吸修剪");
-          } else void onPatch(operations, "修剪片段");
-        }
+        const res = commitClipTrimGesture({
+          active,
+          clips,
+          document,
+          mainTrackMagnet: prefs.mainTrackMagnet,
+          linkageEnabled: prefs.linkageEnabled,
+          setToolbarFeedback,
+          onPatch,
+        });
+        if (res === "early-return") return;
       } else if (active.kind === "caption-trim") {
         const startChanged = Math.abs(active.targetStartUs - active.originalStartUs) >= 1000;
         const endChanged = Math.abs(active.targetEndUs - active.originalEndUs) >= 1000;
