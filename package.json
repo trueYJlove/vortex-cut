@@ -25,7 +25,7 @@
     "package:verify:real": "pnpm --filter @aivideo/desktop package:verify:real",
     "test:python": "uv run --locked --extra dev python tools/ci/run_pytest_gate.py",
     "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:python && pnpm build",
-    "ci:release": "pnpm ci && pnpm test:e2e",
+    "ci:release": "pnpm run ci && pnpm test:e2e",
     "ci:verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:python && pnpm build"
   },
   "devDependencies": {

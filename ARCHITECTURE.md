@@ -1,7 +1,6 @@
 # Vortex Cut 系统架构设计
 
-> 角色：LiuWei（架构师）
-> 状态：架构基线 v1.0（模块边界、进程模型与设计原则）
+> 状态：架构基线（进程模型、安全边界、模块职责与真实目录分层）
 > 首发日期：2026-08-07（首发平台：Windows 10/11 64 位）
 > **当前实现阶段、能力边界与未闭环工作统一见 [`docs/STATUS.md`](docs/STATUS.md)，本文件不单独声明最新交付状态。**
 
@@ -95,30 +94,29 @@ flowchart TB
 
 ## 5. 运行时进程模型
 
-### 5.1 Electron 主进程
+### 5.1 Electron 主进程与 Preload 桥接
 
-职责仅限于操作系统集成：
+职责仅限于操作系统集成与受控通信：
 
-- 管理窗口、菜单、文件选择、拖放和系统通知。
-- 启动 Python Sidecar，分配随机本地端口并生成会话令牌。
-- 监控 Sidecar 健康状态，异常退出时提供诊断和受控重启。
-- 使用操作系统凭据保护能力保存 API Key。
-- 管理自动更新、安装目录、用户数据目录和应用日志。
+- 通过 `main/index.ts` 与 `main/bootstrap/`（`protocol.ts`、`window.ts`、`runtime.ts`）管理窗口、菜单、自定义媒体协议、文件授权与生命周期。
+- 通过 `main/ipc/` 按业务域注册受控 IPC 处理器，经 `preload/index.ts` 汇总 `preload/domains/*.ts` 白名单 API 暴露给 Renderer。
+- 启动 Python Sidecar，分配随机本地端口并生成会话令牌；监控 Sidecar 健康状态，异常退出时提供诊断和受控重启。
+- 使用操作系统凭据保护能力保存 API Key，管理应用配置、安装目录、用户数据目录与应用日志。
 - 退出时通知核心服务停止接收新任务并完成安全落盘。
 
 Electron 不直接访问 SQLite，不拼接 FFmpeg 命令，也不包含创作或时间线业务逻辑。
 
 ### 5.2 React Renderer
 
-负责项目首页、素材箱、候选方案、播放器、简化时间线、字幕、音轨、AI 修改面板、任务中心和导出中心。
+负责项目首页、素材箱、候选方案、合成预览舞台、多轨时间线画布、字幕、音轨、AI 修改面板、任务中心与导出中心；核心时间线与预览/导出变更动作通过 `app/commands/` 可序列化 Command 层与 `editorCommands.ts` 统一分发（纪律见 `AGENTS.md`）。
 
 安全基线：
 
 - `nodeIntegration: false`。
 - `contextIsolation: true`。
-- 仅通过白名单 preload API 使用系统能力。
-- 所有业务读写通过核心服务 API 完成。
-- 页面不持有长期 API Key。
+- 仅通过白名单 preload API 使用系统能力，不直接访问 SQLite、系统凭据或任意外部 URL。
+- 所有业务读写经受控 IPC / 核心服务 API 完成。
+- 页面不持有长期 API Key 或 Provider 原始凭据。
 
 ### 5.3 Python 核心服务
 
@@ -482,136 +480,86 @@ Python 服务使用 PyInstaller 或 Nuitka 打包，不要求用户安装 Python
 
 服务器化之前不得在领域代码中依赖 Windows 绝对路径、Electron 对象或 SQLite 特有 SQL。文件通过 Asset URI 和 BlobStore 接口访问，时间线与 Render Plan 保持纯数据结构。
 
-## 17. 推荐代码仓库结构
+## 17. 实际代码仓库结构与分层
+
+仓库按 Electron 桌面端、手写 TypeScript 契约、Python Core sidecar 与资源/文档四大区域组织：
 
 ```text
-apps/
-  desktop/                 Electron 主进程和打包
-  web/                     React 工作台
-services/
-  core/                    FastAPI 入口和应用组装
-packages/
-  contracts/               TypeScript 契约（**手写**——见下方现状对照）
-  ui/                      可复用 UI 组件
-python/
-  domain/                  纯领域模型和规则
-  application/             用例、事务和端口
-  infrastructure/          SQLite、文件、Provider、FFmpeg
-  media/                   探测、分析、Render Plan 和执行
-  jobs/                    持久化调度器和资源控制
+apps/desktop/
+  electron/
+    main/
+      index.ts               主进程入口（启动顺序编排与生命周期管理）
+      bootstrap/             protocol.ts、window.ts、runtime.ts 启动引导模块
+      ipc/                   按业务域拆分的 IPC 注册器与 register-all.ts / shared.ts
+      *.ts                   sidecar-supervisor、core-admin-client、凭据/文件授权等基础模块
+    preload/
+      index.ts               Preload 桥接总入口（汇总暴露白名单 API）
+      probe-bridge.ts        受控媒体探测桥接
+      domains/               ai-editing、generation-shot、job-model-transcript、
+                             preview-export、project-asset、system、timeline、types
+  src/
+    app/
+      commands/              纯 JSON 可序列化 CommandDefinition、registry.ts 与分发器
+      hooks/                 应用状态、快捷键、渲染与导出 Hooks
+      layout/                AppDialogs.tsx、PreviewStage.tsx 等主工作台布局
+      preview/               合成预览会话、IR 消费、Worker/WebGPU 合成与性能埋点
+      timeline/              TimelineCanvas.tsx 协调层、几何/吸附/播放头 store 与缩略图/波形缓存
+        canvas/              render/*、gestures/*、hit-test.ts、TimelineOverlays.tsx、
+                             TrackHeadColumn.tsx、contextMenuBuilder.tsx
+      ...                    agent-session、angle-sync、captions-provider、editing-grammar、
+                             keyframe-review、media-generation、provider-*、semantic-search、
+                             settings、shot-requirements、worklist、workspace 等功能模块
+    styles/                  00-base-and-preview.css ~ 09-openfilm-tokens-and-overrides.css
+                             （与独立入口 src/tailwind.css 分层协作）
+    ui/ renderer/ probes/ lib/ assets/
+  tests/ e2e/ scripts/       桌面端单测、Playwright Electron E2E 与打包验证脚本
+
+packages/contracts/
+  src/                       手写 TypeScript 契约（index.ts、performance.ts、stage4e.ts、
+                             stage5.ts、stage6r.ts；无 OpenAPI 代码生成器）
+  tests/                     契约守卫测试（根脚本 contracts:generate 实为 contracts build）
+
+services/core/
+  src/aivs_core/             FastAPI 入口、应用服务、SQLite 持久化与领域逻辑
+    migrations/              版本化 SQLite 迁移脚本
+    editing_grammar/ media/ rendering/ renditions/
   tests/
-resources/
-  recipes/
-  platform-profiles/
-  fonts/
-docs/
-  adr/                     架构决策记录
+    unit/                    Core 单元测试与仓库级文档一致性/术语守卫
+    integration/             路由级回归锁与真实媒体集成测试
+
+resources/                   recipes、platform-presets、fonts、keyframe-vocab、manifests、
+                             model-manifests、licenses、ffmpeg、core、renditions
+docs/                        STATUS.md、requirements/、design/（含 adr/）、plans/、archive/
+tools/                       ci/（run_pytest_gate.py 等）、packaging/、fixtures/、performance/
+evidence/                    轻量化验收结论与配置摘要（受单文件体积上限约束）
 ```
 
-### 17.1 现状对照（2026-09-24 核实）
+关键分层约束：
 
-> **上面是目标结构，与实际仓库现状有四处不符。** 新增此节是因为该节曾被读作现状描述，
-> 导致新加入者去找不存在的目录（2026-09-24 文档审计发现）。
+- **契约单源**：前后端类型与结构化契约由 `packages/contracts/src/` 手写维护并配合契约守卫测试保证一致性；仓库不使用 OpenAPI 自动生成前端类型。
+- **领域纯净性**：`services/core/src/aivs_core/` 内的核心领域逻辑不导入 Electron 或具体 Provider SDK，数据库写入与 FFmpeg 参数数组编译收口在 Core 侧。
+- **当前实施边界与待闭环事项**：统一见 [`docs/STATUS.md`](docs/STATUS.md)（本节仅描述代码结构与职责边界）。
 
-| 本节所列 | 现状 | 说明 |
-|---|---|---|
-| `apps/web/` | **不存在** | `apps/` 下只有 `desktop/`。`services/web/` 存在但仅一个未接线的占位组件，未进入 Electron/Renderer 链路（`ADR-0002` R4 已登记） |
-| `packages/ui/` | **不存在** | `packages/` 下只有 `contracts/` |
-| 顶层 `python/{domain,application,infrastructure,media,jobs}` | **不存在** | 领域代码位于 `services/core/src/aivs_core/`，**平铺单层**，未按本节分层。此为 `ADR-0002` R2 登记的结构债，采用"增量分层"渐进偿还 |
-| 「前端类型从 **OpenAPI 契约生成**」 | **与现状相反** | `packages/contracts/src/` 为**手写** TypeScript（`index.ts` 约 2300 行 + `performance.ts`/`stage4e.ts`/`stage5.ts`/`stage6r.ts`），仓库内无 OpenAPI 产物；根 `package.json` 的 `contracts:generate` 实为 `contracts build`，**不是** OpenAPI 生成。契约的单一来源由手写 + 契约守卫测试保证，而非生成器 |
+## 18. 测试策略
 
-**仍然成立**：`apps/desktop/`、`services/core/`、`packages/contracts/`、`resources/`、`docs/design/adr/` 的位置与职责描述；以及"Python 领域层不得导入 FastAPI、Electron 或具体 Provider SDK"——该约束由代码证据支持（`ADR-0002` 评审结论：领域层纯净）。
+### 18.1 自动化测试分层
 
-**Electron 桌面层目录约定**：主进程入口 `apps/desktop/electron/main/index.ts` 仅负责启动顺序编排与生命周期管理，启动引导模块位于 `apps/desktop/electron/main/bootstrap/`（`protocol.ts`、`window.ts`、`runtime.ts`），按业务域拆分的 IPC 注册器位于 `apps/desktop/electron/main/ipc/`；Preload 桥接入口 `apps/desktop/electron/preload/index.ts` 汇总暴露 `apps/desktop/electron/preload/domains/*.ts` 各业务域接口。
+- **领域与渲染单元测试（Python Core）**：时间换算、锁定规则、TimelinePatch 校验、IR 投影、Render Plan 编译、SQLite 迁移、任务调度与文档一致性/术语守卫。
+- **契约与守卫测试（`packages/contracts`）**：手写 TypeScript 契约与核心协议守卫校验（`pnpm lint` / `pnpm typecheck` / `pnpm test` 前自动构建校验）。
+- **桌面端交互与布局测试（`apps/desktop/tests`）**：Editor Command 层、时间线画布几何与手势、合成预览与样式令牌守卫。
+- **集成与端到端测试**：Core 路由回归锁与真实媒体集成测试（`services/core/tests/integration/`），以及 Electron + Playwright E2E（`pnpm test:e2e` / `pnpm run ci:release`）与故障注入/安装验证。
 
-## 18. 分阶段实施计划
+各检查门禁的具体纳入范围与当前状态统一见 [`docs/STATUS.md`](docs/STATUS.md)（不在此处复述）。
 
-以下周期按一名熟悉 Python/TypeScript 的全职工程师估算，仅用于规划。
+### 18.2 人工验收样本维度
 
-### 阶段 0：技术验证（1-2 周）
+- 30 秒、10 分钟与长时长视频样本。
+- CFR/VFR、横屏/竖屏、无音频、多音轨与异常容器样本。
+- 中文路径、空格路径、长路径与外部磁盘素材。
+- 集显与独立 GPU 设备，以及常见游戏高光、搞笑、攻略与口播素材。
 
-实施依据：Stage 0 历史详细设计（已收口，见 [`docs/STATUS.md`](docs/STATUS.md) §2 与 Git 历史）
+## 19. 最终决策
 
-- Electron 启动、认证和关闭 Python Sidecar。
-- FFprobe 读取常见游戏录像，FFmpeg 生成代理和竖屏样片。
-- 验证可变帧率、长路径、中文路径和硬件编码回退。
-- 打包到一台干净 Windows 机器安装运行。
+本项目的核心产品不是“多个 AI 工具的启动器”，也不是“多角色数字员工组织”，而是一个掌握项目状态、素材关系、版本化时间线、任务恢复和可靠渲染的桌面视频生产工作台。
 
-退出条件：证明桌面壳、Sidecar、媒体工具和安装包链路可行。
-
-### 阶段 1：可用剪辑基础（4-6 周）
-
-实施依据：Stage 1 历史详细设计（已收口，见 [`docs/STATUS.md`](docs/STATUS.md) §2 与 Git 历史）
-
-- 项目、素材、SQLite 迁移和本地任务系统。
-- 代理、缩略图、波形、转录和场景切分。
-- 播放器、转录文本选段、简化时间线和自动字幕。
-- 权威预览以及 1080x1920 H.264/AAC 导出。
-- 崩溃恢复、取消、日志和诊断。
-
-退出条件：不依赖 AI 推理，也能完成“导入 -> 按文本剪辑 -> 预览 -> 导出”。
-
-### 阶段 2：AI 粗剪闭环（4-8 周）
-
-- 创作简报、制作配方和 Provider 管理。
-- 多候选片段召回、排序、理由和候选时间线。
-- 自然语言 TimelinePatch、锁定、版本比较和局部重算。
-- Provider 失败处理、费用记录和外传确认。
-
-退出条件：AI 能产出多个可审阅候选，用户主要进行选择和局部修改。
-
-### 阶段 3：游戏配方与多平台（4-8 周）
-
-- 高燃、搞笑、攻略、资讯等配方。
-- HUD 保护、关键区域布局、BGM/原声混合和字幕模板。
-- 抖音、视频号、小红书配置和批量导出。
-- 建立真实样本集，持续评估候选命中率。
-
-### 阶段 4：生成式素材（6-12 周）
-
-- TTS、图片和视频生成 Provider。
-- 脚本/分镜到资产需求清单。
-- 镜头级生成、替换、重试和费用预算。
-- 角色、场景和风格资产管理，为漫剧/短剧做准备。
-
-## 19. 测试策略
-
-### 19.1 自动化测试
-
-- 领域单元测试：时间换算、锁定规则、Patch 校验、版本和缓存失效。
-- 契约测试：前后端 OpenAPI、Provider 统一错误和结构化输出。
-- 集成测试：SQLite 迁移、任务恢复、文件原子写和 FFmpeg Render Plan。
-- 黄金样片测试：固定素材和时间线生成基准视频，比较时长、流信息、关键帧和感知差异。
-- 故障注入：断网、余额不足、模型超时、磁盘不足、进程终止和素材移动。
-- 安装测试：干净 Windows 虚拟机安装、升级、卸载和保留项目。
-
-### 19.2 人工验收样本
-
-至少覆盖：
-
-- 30 秒、10 分钟和 2 小时视频。
-- CFR/VFR、横屏/竖屏、无音频、多音轨和异常文件。
-- 中文路径、空格路径、超长路径和外接硬盘素材。
-- 普通办公机、集成显卡和 NVIDIA GPU 机器。
-- 游戏高光、搞笑片段、攻略解说和非游戏口播。
-
-## 20. 架构验收清单
-
-架构进入编码阶段前，必须满足：
-
-- [ ] 桌面、核心服务、任务、领域和工具边界明确。
-- [ ] 时间线 schema、TimelinePatch 和 Render Plan 有版本化契约。
-- [ ] 原素材只读，外部素材移动有明确恢复流程。
-- [ ] 任务支持落盘、取消、重试、恢复和幂等。
-- [ ] 预览与最终渲染共享 Render Plan，权威预览可验收。
-- [ ] Provider 可替换，模型输出必须结构化校验。
-- [ ] API Key、日志、外部上传和自动更新符合安全基线。
-- [ ] 安装包不要求用户安装 Python、FFmpeg 或数据库。
-- [ ] SQLite、本地文件和本地执行器均有服务器替换接口。
-- [ ] 第一阶段范围可在无 Halo、n8n、多 Agent 的情况下完成。
-
-## 21. 最终决策
-
-本项目的核心产品不是“多个 AI 工具的启动器”，也不是“数字人员工组织”，而是一个掌握项目状态、素材关系、版本化时间线、任务恢复和可靠渲染的桌面视频生产工作台。
-
-成熟开源工具负责专用执行能力，我们开发的系统负责把创作意图转换为可验证、可修改、可追踪的视频工程。先以游戏短视频验证 AI 粗剪和审片闭环，再逐步扩展题材、生成式素材和服务器部署，这是当前风险最低且能够积累长期产品资产的路线。
+成熟开源工具负责专用执行能力，系统本身负责把创作意图转换为可验证、可修改、可追踪的视频工程。通过单源状态治理、严格跨进程安全边界与可序列化编辑命令层，保持桌面单机稳定性与长期可演进性。

@@ -18,11 +18,12 @@ Vortex Cut 是 Vortex 旗下的本地优先、AI 驱动的视频剪辑与多平�
 
 ## 文档导航
 
+- [AI Agent 入口 (CLAUDE.md)](CLAUDE.md)：AI Agent 开工前必读索引，指向工程纪律、状态源与系统架构。
 - [文档总入口](docs/README.md)：按专题查找需求、设计与研究材料。
 - [项目状态源 (`docs/STATUS.md`)](docs/STATUS.md)：唯一声明当前阶段、能力边界与未闭环承诺。
-- [系统架构](ARCHITECTURE.md)：进程边界、核心模块、数据模型与设计原则。
+- [系统架构](ARCHITECTURE.md)：进程边界、核心模块、数据模型与真实代码分层。
 - [用户使用手册](docs/requirements/VORTEX_CUT_USER_MANUAL.md)：编辑器操作说明。
-- [协作与文档纪律](AGENTS.md)：Agent 角色分工与文档同步规则。
+- [工程纪律与文档同步规范](AGENTS.md)：权威文档分工、代码→文档映射、执行门禁与文档同步规则。
 
 ## 本地架构
 
