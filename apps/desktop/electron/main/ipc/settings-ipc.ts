@@ -1,4 +1,4 @@
-import type { DesktopSettings, DesktopSettingsStore, SettingsState } from "./desktop-settings.js";
+import type { DesktopSettings, DesktopSettingsStore, SettingsState } from "../desktop-settings.js";
 
 type IpcHandle = (channel: string, listener: (_event: unknown, input?: unknown) => unknown) => void;
 

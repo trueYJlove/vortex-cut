@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { DesktopSettingsStore } = await import("../electron/main/desktop-settings.js");
-const { registerSettingsIpc } = await import("../electron/main/settings-ipc.js");
+const { registerSettingsIpc } = await import("../electron/main/ipc/settings-ipc.js");
 
 const roots: string[] = [];
 afterEach(async () => {

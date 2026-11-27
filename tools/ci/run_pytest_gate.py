@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import glob
+import os
 import shutil
 import subprocess
 import sys
@@ -117,8 +118,14 @@ def main() -> int:
         f"--basetemp={BASETEMP}",
         f"--junitxml={JUNIT_PATH}",
     ]
+    env = os.environ.copy()
+    if env.get("AIVS_PYTEST_GATE_ALLOW_REAL_PROVIDER") != "1" and env.pop("AIVS_RUN_REAL_PROVIDER_TESTS", None):
+        print(
+            "[pytest-gate] 已隔离本机 AIVS_RUN_REAL_PROVIDER_TESTS"
+            "（如需真网关测试请单跑 pytest -m real_provider 或设置 AIVS_PYTEST_GATE_ALLOW_REAL_PROVIDER=1）"
+        )
     print(f"[pytest-gate] run: {' '.join(cmd[1:])}")
-    code = subprocess.call(cmd)
+    code = subprocess.call(cmd, env=env)
     if code != 0:
         print(f"[pytest-gate] pytest 退出码 {code}", file=sys.stderr)
         return code

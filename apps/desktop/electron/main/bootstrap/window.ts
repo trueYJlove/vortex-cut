@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { AssetKind } from "@aivideo/contracts";
 import { windowIconPath } from "../app-icons.js";
 import { appendLog } from "../logging.js";
-import { probeActive, probeLoadQuery, type ProbeIpcHandle } from "../probe-ipc.js";
+import { probeActive, probeLoadQuery, type ProbeIpcHandle } from "../ipc/probe-ipc.js";
 
 function envAssetPath(kind: AssetKind | undefined): string | undefined {
   const raw = process.env.AIVS_E2E_ASSET_PATHS;

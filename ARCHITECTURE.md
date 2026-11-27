@@ -72,9 +72,8 @@ flowchart TB
         Files["本地项目与缓存目录"]
     end
 
-    UI -->|"HTTP/WebSocket"| Core
-    UI -->|"受限 IPC"| Main
-    Main -->|"启动、监控、关闭"| Core
+    UI -->|"Preload 白名单 / 受限 IPC"| Main
+    Main -->|"启动、受控代理 HTTP (127.0.0.1)、监控与关闭"| Core
     Core --> DB
     Core --> Worker
     Worker --> Files
@@ -298,7 +297,7 @@ flowchart LR
 
 为了同时保证交互速度和最终一致性，采用两层预览：
 
-- **交互预览**：React 播放代理文件并叠加基础字幕、裁切和音量，响应拖动和修剪。它追求快速，不宣称像素级等同最终成片。
+- **交互预览**：本地合成预览引擎（`apps/desktop/src/app/preview/`）按需解码原素材或可选代理文件，实时合成多轨图层、字幕、裁切与音频，响应播放与拖动修剪；代理仅为可选加速项，不强依赖代理才可预览（能力边界见 [`docs/STATUS.md`](docs/STATUS.md) §3）。它追求交互响应，不宣称像素级等同最终成片。
 - **权威预览**：由 Render 模块使用与最终导出相同的 Render Plan 生成低分辨率或局部预览。用户最终验收以此为准。
 
 ### 9.2 Render Plan
@@ -353,14 +352,13 @@ queued -> running -> succeeded
 
 ### 11.1 应用级目录
 
+桌面端通过 Electron `app.getPath("userData")`（按当前安装身份解析应用数据根目录）统一管理运行时数据落盘，主要子路径包括：
+
 ```text
-%LOCALAPPDATA%/AIVideoStudio/
-  app.db
-  config/
-  logs/
-  models/
-  shared-cache/
-  crash-reports/
+<Electron userData>/
+  data-v2/                   Python Core 数据目录（SQLite、项目目录、模型与共享缓存）
+  logs/                      桌面端与 Core 运行日志（desktop.log 等）
+  settings / secrets         桌面设置（如代理配置）与操作系统加密凭据存储
 ```
 
 ### 11.2 项目目录
@@ -509,15 +507,15 @@ apps/desktop/
       ...                    agent-session、angle-sync、captions-provider、editing-grammar、
                              keyframe-review、media-generation、provider-*、semantic-search、
                              settings、shot-requirements、worklist、workspace 等功能模块
+    styles.css               样式聚合入口（按序引入 styles/00–09）
     styles/                  00-base-and-preview.css ~ 09-openfilm-tokens-and-overrides.css
                              （与独立入口 src/tailwind.css 分层协作）
     ui/ renderer/ probes/ lib/ assets/
-  tests/ e2e/ scripts/       桌面端单测、Playwright Electron E2E 与打包验证脚本
+  tests/ e2e/ scripts/       桌面端单测（含 contracts.test.ts）、Playwright E2E 与打包脚本
 
 packages/contracts/
   src/                       手写 TypeScript 契约（index.ts、performance.ts、stage4e.ts、
                              stage5.ts、stage6r.ts；无 OpenAPI 代码生成器）
-  tests/                     契约守卫测试（根脚本 contracts:generate 实为 contracts build）
 
 services/core/
   src/aivs_core/             FastAPI 入口、应用服务、SQLite 持久化与领域逻辑
@@ -528,7 +526,8 @@ services/core/
     integration/             路由级回归锁与真实媒体集成测试
 
 resources/                   recipes、platform-presets、fonts、keyframe-vocab、manifests、
-                             model-manifests、licenses、ffmpeg、core、renditions
+                             model-manifests、licenses、ffmpeg、renditions（打包产物暂存目录
+                             resources/core/ 由构建脚本生成，已忽略不入库）
 docs/                        STATUS.md、requirements/、design/（含 adr/）、plans/、archive/
 tools/                       ci/（run_pytest_gate.py 等）、packaging/、fixtures/、performance/
 evidence/                    轻量化验收结论与配置摘要（受单文件体积上限约束）
@@ -536,7 +535,7 @@ evidence/                    轻量化验收结论与配置摘要（受单文件
 
 关键分层约束：
 
-- **契约单源**：前后端类型与结构化契约由 `packages/contracts/src/` 手写维护并配合契约守卫测试保证一致性；仓库不使用 OpenAPI 自动生成前端类型。
+- **契约单源**：前后端类型与结构化契约由 `packages/contracts/src/` 手写维护，并通过 `apps/desktop/tests/contracts.test.ts` 等契约守卫测试保证一致性（根脚本 `contracts:generate` 实为 `@aivideo/contracts build`）；仓库不使用 OpenAPI 自动生成前端类型。
 - **领域纯净性**：`services/core/src/aivs_core/` 内的核心领域逻辑不导入 Electron 或具体 Provider SDK，数据库写入与 FFmpeg 参数数组编译收口在 Core 侧。
 - **当前实施边界与待闭环事项**：统一见 [`docs/STATUS.md`](docs/STATUS.md)（本节仅描述代码结构与职责边界）。
 
@@ -545,7 +544,7 @@ evidence/                    轻量化验收结论与配置摘要（受单文件
 ### 18.1 自动化测试分层
 
 - **领域与渲染单元测试（Python Core）**：时间换算、锁定规则、TimelinePatch 校验、IR 投影、Render Plan 编译、SQLite 迁移、任务调度与文档一致性/术语守卫。
-- **契约与守卫测试（`packages/contracts`）**：手写 TypeScript 契约与核心协议守卫校验（`pnpm lint` / `pnpm typecheck` / `pnpm test` 前自动构建校验）。
+- **契约与守卫测试（`packages/contracts` + `apps/desktop/tests/contracts.test.ts`）**：手写 TypeScript 契约编译与前后端协议守卫校验（`pnpm lint` / `pnpm typecheck` / `pnpm test` 前自动构建校验）。
 - **桌面端交互与布局测试（`apps/desktop/tests`）**：Editor Command 层、时间线画布几何与手势、合成预览与样式令牌守卫。
 - **集成与端到端测试**：Core 路由回归锁与真实媒体集成测试（`services/core/tests/integration/`），以及 Electron + Playwright E2E（`pnpm test:e2e` / `pnpm run ci:release`）与故障注入/安装验证。
 

@@ -153,10 +153,10 @@ of living specs should also omit `Planning Gate` / `Design Gate` draft suffixes.
   直接 `pnpm ci` 会**报错退出而根本不执行本仓脚本**（2026-10-23 实测踩中——此前本节写的就是
   `pnpm ci`，属「写了个无法执行的命令」）。CI 侧由 `.github/workflows/ci.yml` 的两个 job 覆盖：
   `python-unit`（`pnpm test:python`）与 `desktop`（lint / typecheck / vitest / build）。
-  What the Python step covers and excludes, and its closeout status, are declared in
-  `docs/STATUS.md` §4 **P190** — reference it (Rule 5), do not restate it. In particular `services/core/tests/integration` is **not** in the
-  pipeline: a route-level regression living there will not be caught — check P190 before relying
-  on one.
+  `pnpm test:python` 由 `tools/ci/run_pytest_gate.py` 统一执行 `services/core/tests/unit` 与
+  `services/core/tests/integration/test_*_routes.py` 路由回归锁，并在 pytest 通过后运行
+  `tools/ci/check_pytest_skips.py` 跳过/收集数守卫；其余生成重型真实媒体夹具的
+  `services/core/tests/integration/` 集成测试不在默认 CI 管道内（修改路由或跨模块集成链路时需独立回归）。
 - **Rules 1, 3, 4, 5** — verified at the Verification Gate through independent review, checking that
   STATUS.md §1 matches code, §4 reflects every open commitment, and no new state restatement
   has appeared elsewhere.

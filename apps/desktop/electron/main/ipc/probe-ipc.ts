@@ -1,7 +1,7 @@
 import { app, ipcMain, screen } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
-import type { RestrictedMediaRegistry } from "./restricted-media.js";
+import type { RestrictedMediaRegistry } from "../restricted-media.js";
 
 /**
  * M3-0 探针 dev-only IPC（冻结方案 §7.1 四层隔离 · 第 1 层）。
@@ -116,7 +116,7 @@ export function registerProbeIpc(deps: { registry: RestrictedMediaRegistry }): P
     };
   });
   ipcMain.handle("probe:done", (_event, summary: unknown) => {
-    void import("./logging.js").then(logging =>
+    void import("../logging.js").then(logging =>
       logging.appendLog(logging.defaultLogPath(app.getPath("userData")), `probe ${name} done: ${JSON.stringify(summary ?? {}).slice(0, 2000)}`));
     setTimeout(() => app.quit(), 500);
     return true;

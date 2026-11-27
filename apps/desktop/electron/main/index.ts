@@ -6,7 +6,7 @@ import { createMainWindowManager } from "./bootstrap/window.js";
 import { DesktopSettingsStore } from "./desktop-settings.js";
 import { registerAllIpc } from "./ipc/register-all.js";
 import { appendLog, defaultLogPath, redact } from "./logging.js";
-import { registerProbeIpc, type ProbeIpcHandle } from "./probe-ipc.js";
+import { registerProbeIpc, type ProbeIpcHandle } from "./ipc/probe-ipc.js";
 import { RestrictedMediaRegistry } from "./restricted-media.js";
 import { destroyTray, initTray } from "./tray.js";
 

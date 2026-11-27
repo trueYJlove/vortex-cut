@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerPerformanceIpc } from "../electron/main/performance-ipc.js";
+import { registerPerformanceIpc } from "../electron/main/ipc/performance-ipc.js";
 
 const now = "2026-09-09T00:00:00.000Z";
 const hashA = `sha256:${"a".repeat(64)}`;

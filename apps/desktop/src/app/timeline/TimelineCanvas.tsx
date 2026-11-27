@@ -68,16 +68,12 @@ import {
   type CaptionRenderRect,
   type ActiveTransitionRenderRect,
   type ClipRenderRect,
-  type TickMark,
   type TimelineHover,
   type TimelineInteraction,
-  type MoveInteraction,
   type TimelineRuntimePrefs,
   type TimelineSelection,
   type TimelineAssetDropIntent,
   type TimelineViewState,
-  type TransitionRenderRect,
-  type TrimEdge,
 } from "./types.js";
 import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer.js";
 import { MarkerLane } from "./MarkerLane.js";
@@ -90,7 +86,6 @@ import type { WaveformCache } from "./waveform-cache.js";
 import {
   CLIP_ROW_INSET,
   KIND_COLOR_VARS,
-  formatTimelineHoverTime,
 } from "./canvas/render/theme.js";
 import {
   THUMB_CELL_PX,
@@ -150,6 +145,43 @@ import {
   stepMarqueeGesture,
   stepScrollbarDrag,
 } from "./canvas/gestures/marquee-gesture.js";
+import {
+  SCROLLBAR_HEIGHT_PX,
+  SNAP_PX,
+  clampMoveStart,
+  clampScrollX,
+  clampTimelineZoom,
+  clipAudioBand,
+  clipLabelPinShift,
+  timelineWheelPanDelta,
+  clipDuration,
+  computeTimelineTicks,
+  computeClipRects,
+  computeTrackRows,
+  computeTransitionRects,
+  computeActiveTransitionRects,
+  TRACK_VIEW_PAD,
+  dragEdgeAutoScrollStep,
+  hitTestClips,
+  scrollBounds,
+  snapCandidates,
+  snapClipPaintRect,
+  snapValue,
+  stepTimelineZoom,
+  timeToX,
+  timelineDropHit,
+  timelineSliderToZoom,
+  timelineZoomAfterDurationChange,
+  timelineZoomLimits,
+  timelineZoomToPps,
+  timelineZoomToSlider,
+  trackRowOf,
+  xToTime,
+  yToVolume,
+  zoomAtAnchor,
+  type TrackRowLayout,
+} from "./geometry.js";
+import { planActiveTransitionResize } from "./active-transition-edit.js";
 
 export {
   THUMB_CELL_PX,
@@ -167,50 +199,7 @@ const canChangeClipSpeed = (clip: TimelineClip): boolean =>
   && clip.source_end_us != null
   && clip.source_end_us > clip.source_start_us;
 
-import {
-  SCROLLBAR_HEIGHT_PX,
-  SNAP_PX,
-  clampMoveStart,
-  clampScrollX,
-  clampTimelineZoom,
-  clipAudioBand,
-  clipLabelPinShift,
-  timelineWheelPanDelta,
-  clipDuration,
-  computeTimelineTicks,
-  computeClipRects,
-  computeTrackRows,
-  computeTransitionRects,
-  computeActiveTransitionRects,
-  TRACK_SIZES,
-  TRACK_VIEW_PAD,
-  dragEdgeAutoScrollStep,
-  hitTestClips,
-  scrollBounds,
-  snapCandidates,
-  snapClipPaintRect,
-  snapValue,
-  stepTimelineZoom,
-  timeToX,
-  timelineDropHit,
-  timelineSliderToZoom,
-  timelineZoomAfterDurationChange,
-  timelineZoomLimits,
-  timelineZoomToPps,
-  timelineZoomToSlider,
-  trackRowOf,
-  trackRowsTotalHeight,
-  xToTime,
-  snapTimeToFrame,
-  yToVolume,
-  zoomAtAnchor,
-  type TrackRowLayout,
-} from "./geometry.js";
-import { clearActiveTransitionOperations, planActiveTransitionResize } from "./active-transition-edit.js";
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const formatTime = formatTimelineHoverTime;
 
 const createTimelineClipId = (): TimelineClipId => {
   const uuid = globalThis.crypto?.randomUUID?.().replaceAll("-", "");
@@ -223,28 +212,6 @@ const snapUsToFrame = (us: number, fpsNum: number, fpsDen: number) => {
   const safeDen = Number.isFinite(fpsDen) && fpsDen > 0 ? fpsDen : 1;
   const frame = Math.round((us * safeNum) / (1_000_000 * safeDen));
   return Math.max(0, Math.round((frame * 1_000_000 * safeDen) / safeNum));
-};
-
-const formatRulerTime = (us: number) => {
-  const totalSeconds = us / 1_000_000;
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  if (hours > 0)
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-};
-
-/** 剪映式片段时长码：HH:MM:SS:FF（FF = 帧号）。 */
-const formatTimecode = (us: number, frameRate: number) => {
-  const fps = Math.max(1, frameRate);
-  const totalFrames = Math.max(0, Math.round((us / 1_000_000) * fps));
-  const frames = Math.floor(totalFrames % fps);
-  const totalSeconds = Math.floor(totalFrames / fps);
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60) % 60;
-  const hours = Math.floor(totalSeconds / 3600);
-  return [hours, minutes, seconds, frames].map((part) => String(part).padStart(2, "0")).join(":");
 };
 
 /** 时间线总时长 = 所有片段最大终点（自由定位下允许空隙，列表末尾未必最晚）。 */
@@ -502,9 +469,6 @@ export function computeFrameRequests(
 }
 
 // ── Caption geometry ─────────────────────────────────────────────────────────
-
-/** Minimum caption duration (µs), mirroring core MIN_CAPTION_US. */
-const MIN_CAPTION_US = 200_000;
 
 function computeCaptionRects(
   captions: TimelineCaption[],
@@ -1782,12 +1746,6 @@ export function TimelinePanel({
       setContextMenu(null);
       const coords = canvasCoords(event);
       if (!coords) return;
-      lastClientPointerRef.current = {
-        clientX: event.clientX,
-        clientY: event.clientY,
-        pointerId: event.pointerId,
-        altKey: Boolean(event.altKey),
-      };
       const { x, y } = coords;
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -2938,10 +2896,6 @@ export function TimelinePanel({
 
   const selectedClip =
     selection?.kind === "clip" ? clips.find((c) => c.clip_id === selection.id) : undefined;
-  const selectedCaption =
-    selection?.kind === "caption"
-      ? captions.find((c) => c.caption_id === selection.id)
-      : undefined;
   const selectedIds =
     selection?.kind === "clip"
       ? [selection.id]
@@ -2959,9 +2913,6 @@ export function TimelinePanel({
     const members = clips.filter(clip => clip.link_group_id === group);
     return members.length && members.every(clip => !isClipLocked(clip.clip_id)) ? [members[0]] : [];
   });
-  const clipLocked = Boolean(
-    selectedClip && isClipLocked(selectedClip.clip_id),
-  );
   const canSplitSelection = useSyncExternalStore(activePlayheadStore.subscribe, () =>
     splitSelectionAt(selectedClips, activePlayheadStore.get(), document).length !== 0
   );
@@ -2984,10 +2935,6 @@ export function TimelinePanel({
         : { ...current, endUs: Math.min(totalUs, Math.max(timeUs, current.startUs + MIN_RANGE_US)) };
     });
   };
-  const captionLocked = Boolean(
-    selectedCaption?.source_clip_id &&
-      isClipLocked(selectedCaption.source_clip_id),
-  );
 
   // ── 自由定位：向前/向后移动 = 逐帧微调（同轨无重叠钳制） ──────────────────
   const nudgeTarget = (clip: TimelineClip, deltaUs: number): number | null => {
@@ -3003,8 +2950,6 @@ export function TimelinePanel({
     const rounded = Math.round(target);
     return Math.abs(rounded - clip.timeline_start_us) >= 1000 ? rounded : null;
   };
-  const canNudge = (deltaUs: number) =>
-    Boolean(selectedClip) && !clipLocked && nudgeTarget(selectedClip!, deltaUs) !== null;
   const advancedEditIds = (): string[] | null => {
     if (scrubMode === "roll") {
       if (selectedClips.length !== 2) return null;
