@@ -2,6 +2,8 @@ import pytest
 
 from aivs_core.database import Database
 
+pytestmark = pytest.mark.real_db_init
+
 
 def test_sqlite_is_wal_and_running_jobs_are_interrupted(tmp_path) -> None:
     db = Database(tmp_path / "stage0.db")

@@ -42,6 +42,7 @@ asyncio_mode = "auto"
 # 需要的只是**偶发手工清理**：rm -rf "$TEMP"/pytest-of-*  （或 CI 每轮 --basetemp 后自行删除）。
 markers = [
   "real_provider: explicit opt-in test that sends selected text to a configured external provider",
+  "real_db_init: test exercises real Database.initialize() without template DB cloning",
 ]
 
 [tool.ruff]
