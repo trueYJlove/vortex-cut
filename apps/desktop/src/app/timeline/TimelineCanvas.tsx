@@ -1058,14 +1058,18 @@ export function TimelinePanel({
   useEffect(() => { thumbnailLoaderRef.current = thumbnailLoader; }, [thumbnailLoader]);
   useEffect(() => {
     if (!thumbnailLoader) return;
-    const assetIds = new Set(assetMedia.map(media => media.asset_id));
-    // 素材已离开时间线：取消其装载（减少无谓请求），但保留已登记的 sprite。
+    const visualVideoAssetIds = new Set<string>(
+      clips.filter(clip => clip.asset_kind === "video").map(clip => clip.asset_id),
+    );
+    // 素材已无时间线视觉消费者：取消其装载（减少无谓请求），但保留已登记的 sprite。
     for (const [assetId, cancel] of [...spriteInflightRef.current]) {
-      if (!assetIds.has(assetId)) { cancel(); spriteInflightRef.current.delete(assetId); }
+      if (!visualVideoAssetIds.has(assetId)) { cancel(); spriteInflightRef.current.delete(assetId); }
     }
-    // 仍在途的素材不再重复起链（每素材单飞）。
+    // 仍在途的素材不再重复起链（每素材单飞）；仅作音频使用的视频跳过预抽。
     const pending = assetMedia.filter(media =>
       media.asset_id
+      && media.kind === "video"
+      && visualVideoAssetIds.has(media.asset_id)
       && !spriteInflightRef.current.has(media.asset_id)
       && !spriteLoadedRef.current.has(media.asset_id)
       && !spriteSkippedRef.current.has(media.asset_id),
@@ -1092,7 +1096,7 @@ export function TimelinePanel({
       spriteInflightRef.current.set(media.asset_id, cancel);
     }
     // 注意：不返回清理函数——在途链跨 effect 轮次存活，由上面的差集取消。
-  }, [assetMedia, thumbnailLoader]);
+  }, [assetMedia, clips, thumbnailLoader]);
 
   // 卸载时取消全部在途装载：退避定时器若继续跑，会在组件消失后仍发 IPC/fetch，
   // 测试环境里表现为「上一个用例的定时器打断下一个用例」（已实测）。

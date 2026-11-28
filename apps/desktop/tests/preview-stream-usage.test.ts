@@ -267,4 +267,79 @@ describe("preview stream usage", () => {
       }
     }
   });
+
+  it("4K/8K audio-only video with audio keeps original ticket and incurs zero video resolve/rig/decode", async () => {
+    const ir = streamUsageIr({
+      asset_id: "asset_8k_audio_only",
+      duration_us: 10_000_000,
+      has_audio: true,
+      audio_required: true,
+      video_required: false,
+      geometry: { width: 0, height: 0, sar: 1 },
+    }, false);
+    const resolver = { resolve: vi.fn() };
+    const session = await PreviewSession.create(
+      document.createElement("div"),
+      ir,
+      new Map([["asset_8k_audio_only", TICKET]]),
+      new Map([["clip_audio", { enabled: true, gainDb: 0 }]]),
+      undefined,
+      resolver as never,
+      "balanced",
+    );
+    expect(resolver.resolve).not.toHaveBeenCalled();
+    expect(ScriptedWorker.instances).toHaveLength(1); // compositor only, no decode worker
+    expect((session as unknown as { tickets: Map<string, string> }).tickets.get("asset_8k_audio_only")).toBe(TICKET);
+    await expect(session.decodeUsageCounters()).resolves.toEqual([expect.objectContaining({
+      input_id: "in_shared",
+      asset_id: "asset_8k_audio_only",
+      video_required: false,
+      audio_required: true,
+      has_audio: true,
+      video_rig_created: false,
+      source_resolve_requests: 0,
+      proxy_resolutions: 0,
+      decode_requests: 0,
+      webcodecs_decode_submissions: 0,
+      webcodecs_output_callbacks: 0,
+    })]);
+    session.dispose();
+  });
+
+  it("removing visual consumer from dual-use asset drops video counters back to zero on rebuild", async () => {
+    const resolver = {
+      resolve: vi.fn().mockResolvedValue({
+        url: PROXY,
+        isProxy: true,
+        description: { coded_width: 640, coded_height: 360 },
+      }),
+    };
+    const dualIr = streamUsageIr({ video_required: true, audio_required: true, has_audio: true }, true);
+    const session = await PreviewSession.create(
+      document.createElement("div"), dualIr, new Map([["asset_shared", TICKET]]), undefined, undefined, resolver as never, "balanced",
+    );
+    const dualCounters = await session.decodeUsageCounters();
+    expect(dualCounters[0]).toMatchObject({ video_required: true, video_rig_created: true, proxy_resolutions: 1 });
+
+    const audioOnlyIr = streamUsageIr({ video_required: false, audio_required: true, has_audio: true, geometry: { width: 0, height: 0, sar: 1 } }, false);
+    // Input capabilities shrank: replaceIr must reject so caller rebuilds without a visual rig.
+    expect(session.replaceIr(audioOnlyIr)).toBe(false);
+    session.dispose();
+
+    resolver.resolve.mockClear();
+    const rebuilt = await PreviewSession.create(
+      document.createElement("div"), audioOnlyIr, new Map([["asset_shared", TICKET]]), undefined, undefined, resolver as never, "balanced",
+    );
+    expect(resolver.resolve).not.toHaveBeenCalled();
+    await expect(rebuilt.decodeUsageCounters()).resolves.toEqual([expect.objectContaining({
+      video_required: false,
+      video_rig_created: false,
+      source_resolve_requests: 0,
+      proxy_resolutions: 0,
+      decode_requests: 0,
+      webcodecs_decode_submissions: 0,
+      webcodecs_output_callbacks: 0,
+    })]);
+    rebuilt.dispose();
+  });
 });

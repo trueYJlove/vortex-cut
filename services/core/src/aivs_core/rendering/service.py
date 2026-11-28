@@ -367,6 +367,14 @@ class RenderCoordinator:
         """compile 后的公共投影段：ffprobe（A07 会话缓存）→ 后台投影。"""
         probe_by_asset: dict[str, dict[str, Any]] = {}
         for item in plan["inputs"]:
+            video_required = bool(item.get("video_required", item["asset_kind"] != "audio"))
+            if not video_required:
+                probe_by_asset[item["asset_id"]] = {
+                    "video_streams": [],
+                    "audio_streams": [{}] if item.get("has_audio") else [],
+                    "duration_us": int(item.get("duration_us") or 0),
+                }
+                continue
             key = str(item["fingerprint"])
             if key not in self.preview_probe_cache:
                 # 异步解析：同步 resolve 含全文件 SHA-256，在事件循环上逐个执行
@@ -538,22 +546,30 @@ class RenderCoordinator:
         stage("preparing")
         if phase is not None:
             phase("preparing", None)  # 准备耗时组成复杂，诚实显示不定进度
-        # 异步解析（同 _project_plan）：同步版含全文件 SHA-256，多输入时逐个
-        # 阻塞事件循环。此处按输入顺序 await，语义与同步版一致。
-        input_paths: dict[str, Path] = {}
-        for item in plan["inputs"]:
-            resolved = await self.projects.resolve_asset_path_async(item["asset_id"])
-            input_paths[item["input_id"]] = Path(resolved["path"])
         # A07：segment probes 按唯一 input 去重（900 同源切段 = 1 个 input →
-        # 1 次 ffprobe），再映射回 segment 顺序；探测走会话缓存通道。
+        # 1 次 ffprobe），再映射回 segment 顺序；仅作静音占位的非静图输入
+        # 不解析路径、不调用 ffprobe。
+        input_paths: dict[str, Path] = {}
         probe_by_input: dict[str, dict[str, Any]] = {}
         for item in plan["inputs"]:
             input_id = item["input_id"]
             if input_id in probe_by_input:
                 continue
+            video_req = bool(item.get("video_required", item["asset_kind"] != "audio"))
+            audio_req = bool(item.get("audio_required", item.get("has_audio", False)))
+            if not video_req and not audio_req and item["asset_kind"] != "image":
+                input_paths[input_id] = Path("")
+                probe_by_input[input_id] = {
+                    "video_streams": [],
+                    "audio_streams": [],
+                    "duration_us": int(item.get("duration_us") or 0),
+                }
+                continue
+            resolved = await self.projects.resolve_asset_path_async(item["asset_id"])
+            input_paths[input_id] = Path(resolved["path"])
             probe_by_input[input_id] = await self._probe(
                 input_paths[input_id], self._asset_probe_fingerprint(item["asset_id"]),
-                require_video=item["asset_kind"] == "video",
+                require_video=item["asset_kind"] == "video" and video_req,
             )
         segment_paths = [input_paths[item["input_id"]] for item in plan["segments"]]
         segment_probes = [probe_by_input[item["input_id"]] for item in plan["segments"]]

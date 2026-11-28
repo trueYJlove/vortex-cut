@@ -235,7 +235,7 @@ export function ClipProperties({ clip, clipName, working, baseRevisionId, locked
       <div className="pp-row">
         <label>图片时长</label>
         <span className="pp-num">
-          <NumberField value={(clip.timeline_end_us - clip.timeline_start_us) / 1_000_000} min={0.5} max={30} step={0.5} unit="s" decimals={1} ariaLabel="图片时长" mark="⏱"
+          <NumberField value={(clip.timeline_end_us - clip.timeline_start_us) / 1_000_000} min={0.1} max={Math.floor(Number.MAX_SAFE_INTEGER / 1_000_000)} step={0.1} unit="s" decimals={1} ariaLabel="图片时长" mark="⏱"
             onDraft={v => updateLocal({ timeline_end_us: clip.timeline_start_us + Math.round(v * 1_000_000) })}
             onCommit={v => void onPatch([{ op: "set_image_duration", clip_id: clip.clip_id, duration_us: Math.round(v * 1_000_000) }], "调整图片时长")} />
         </span>

@@ -136,17 +136,64 @@ def test_video_backed_audio_role_disables_video_decode_and_keeps_silence_fallbac
         "output.mp4",
         captions=False,
     )
-    input_index = args.index("-i")
-    assert args[input_index - 1] == "-vn"
-    assert args[input_index + 1] == "video-as-audio.mp4"
     graph = args[args.index("-filter_complex") + 1]
-    assert "[0:v]" not in graph
     assert ("[0:a:0]" in graph) is has_audio
     silent_a1 = (
         "anullsrc=channel_layout=stereo:sample_rate=48000,"
         "atrim=duration=1.000000,asetpts=PTS-STARTPTS[a1s0]"
     )
     assert (silent_a1 in graph) is (not has_audio)
+    if has_audio:
+        assert "[0:v]" not in graph
+        input_index = args.index("-i")
+        assert args[input_index - 1] == "-vn"
+        assert args[input_index + 1] == "video-as-audio.mp4"
+    else:
+        assert "video-as-audio.mp4" not in args
+
+
+def test_skipping_silent_audio_input_keeps_subsequent_visual_and_black_indices() -> None:
+    """P235-R2：跳过无音轨音频段 -i 后，后续覆盖轨与 keyframes 黑底输入索引同步重映射。"""
+    plan = {
+        "segments": [
+            {
+                "clip_id": "v1", "input_id": "I0", "track_id": "V1", "track_index": 1, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+                "keyframes": {"position": {"frames": [{"t_us": 0, "x": 0.0, "y": 0.0}, {"t_us": 2_000_000, "x": 0.1, "y": 0.0}]}},
+            },
+            {
+                "clip_id": "a_silent", "input_id": "I1", "track_id": "A1", "track_index": 2, "asset_kind": "audio",
+                "source_asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": True, "audio_required": False, "has_audio": False, "gain_db": 0.0,
+            },
+            {
+                "clip_id": "v2", "input_id": "I2", "track_id": "V2", "track_index": 0, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 320, "height": 180, "fps_num": 30, "fps_den": 1},
+    }
+    probes = [
+        {"video_streams": [{"width": 320, "height": 180}], "audio_streams": []},
+        {"video_streams": [{"width": 3840, "height": 2160}], "audio_streams": []},
+        {"video_streams": [{"width": 320, "height": 180}], "audio_streams": []},
+    ]
+    args = build_timeline_args(
+        plan, [Path("main.mp4"), Path("silent4k.mp4"), Path("pip.mp4")], probes, "libopenh264", "out.mp4", captions=False,
+    )
+    assert "silent4k.mp4" not in args
+    assert args.count("-i") == 3  # main.mp4(0), pip.mp4(1), black lavfi(2)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "[0:v:0]" in graph
+    assert "[1:v:0]" in graph
+    assert "[2:v]" in graph  # keyframes 黑底输入号随 -i 缩减为 2
 
 
 def test_builder_rejects_unknown_layout() -> None:

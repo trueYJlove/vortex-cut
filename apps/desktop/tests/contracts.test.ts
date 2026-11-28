@@ -466,3 +466,81 @@ describe("H1 decode capability contracts", () => {
     expect(() => parseDecodeCapabilityTable({ rows: [], probed_at: now, path: "/secret" })).toThrow();
   });
 });
+
+describe("P235-R2 duration bounds and safe integer guards", () => {
+  it("accepts 100ms through Number.MAX_SAFE_INTEGER and rejects sub-100ms or unsafe integers", () => {
+    const baseClip = {
+      clip_id: "clip_1",
+      track_id: "V1",
+      order_index: 0,
+      asset_id: "asset_1",
+      asset_kind: "image" as const,
+      source_start_us: null,
+      source_end_us: null,
+      timeline_start_us: 0,
+      timeline_end_us: 45_000_000,
+      layout: "fit" as const,
+      audio: { enabled: false, gain_db: 0 },
+    };
+    const baseDoc = {
+      schema_version: 1 as const,
+      project_id: "project_1",
+      canvas: { width: 1080, height: 1920, fps_num: 30, fps_den: 1, background_color: "#000000" },
+      tracks: [
+        { id: "V1", kind: "video" as const, locked: false, hidden: false, muted: false, solo: false },
+        { id: "A1", kind: "audio" as const, locked: false, hidden: false, muted: false, solo: false },
+      ],
+      clips: [baseClip],
+      captions: [],
+      provenance: { created_by: "user" as const, source_transcript_ids: [] },
+    };
+    expect(isTimelineDocument(baseDoc)).toBe(true);
+    expect(isTimelineDocument({
+      ...baseDoc,
+      clips: [{ ...baseClip, timeline_end_us: Number.MAX_SAFE_INTEGER }],
+    })).toBe(true);
+    expect(isTimelineDocument({
+      ...baseDoc,
+      clips: [{ ...baseClip, timeline_end_us: 99_999 }],
+    })).toBe(false);
+    expect(isTimelineDocument({
+      ...baseDoc,
+      clips: [{ ...baseClip, timeline_end_us: Number.MAX_SAFE_INTEGER + 2 }],
+    })).toBe(false);
+    expect(isTimelineDocument({
+      ...baseDoc,
+      clips: [{
+        ...baseClip,
+        asset_kind: "video" as const,
+        source_start_us: Number.MAX_SAFE_INTEGER + 2,
+        source_end_us: Number.MAX_SAFE_INTEGER + 2 + 100_000,
+        timeline_end_us: 100_000,
+      }],
+    })).toBe(false);
+
+    expect(isTimelinePatchOperation({
+      op: "set_image_duration", clip_id: "clip_1", duration_us: 100_000,
+    })).toBe(true);
+    expect(isTimelinePatchOperation({
+      op: "set_image_duration", clip_id: "clip_1", duration_us: 45_000_000,
+    })).toBe(true);
+    expect(isTimelinePatchOperation({
+      op: "set_image_duration", clip_id: "clip_1", duration_us: Number.MAX_SAFE_INTEGER,
+    })).toBe(true);
+    expect(isTimelinePatchOperation({
+      op: "set_image_duration", clip_id: "clip_1", duration_us: 99_999,
+    })).toBe(false);
+    expect(isTimelinePatchOperation({
+      op: "set_image_duration", clip_id: "clip_1", duration_us: Number.MAX_SAFE_INTEGER + 2,
+    })).toBe(false);
+    expect(isTimelinePatchOperation({
+      op: "insert_asset_clip", asset_id: "asset_1", at_index: 0, duration_us: Number.MAX_SAFE_INTEGER + 2,
+    })).toBe(false);
+    expect(isTimelinePatchOperation({
+      op: "trim_clip", clip_id: "clip_1", source_start_us: 0, source_end_us: Number.MAX_SAFE_INTEGER + 2,
+    })).toBe(false);
+    expect(isTimelinePatchOperation({
+      op: "set_clip_source_window", clip_id: "clip_1", source_start_us: 0, source_end_us: Number.MAX_SAFE_INTEGER + 2, anchor: "start",
+    })).toBe(false);
+  });
+});

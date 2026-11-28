@@ -7,8 +7,11 @@
 //
 // 这里锁三件事：①未就绪会重试并最终登记；②failed / 非视频素材立刻放弃且负缓存；
 // ③取消后不再登记（StrictMode 重挂载不留悬挂定时器）。
-import { describe, expect, it, vi } from "vitest";
-import { loadFilmstripsOnce, SPRITE_RETRY_BACKOFF_MS } from "../src/app/timeline/TimelineCanvas.js";
+import { createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render } from "@testing-library/react";
+import type { TimelineDocument } from "@aivideo/contracts";
+import { TimelinePanel, loadFilmstripsOnce, SPRITE_RETRY_BACKOFF_MS } from "../src/app/timeline/TimelineCanvas.js";
 
 function fakeBitmap(): ImageBitmap {
   return { width: 160, height: 900, close: () => undefined } as unknown as ImageBitmap;
@@ -148,5 +151,81 @@ describe("WP-P232 预抽 sprite 装载", () => {
     stop();
     await h.drain();
     expect(h.registered).toHaveLength(0);
+  });
+});
+
+describe("P235-R2 audio-only 视频片段不触发 TimelinePanel filmstrip 预抽", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("仅作为音频轨消费的视频素材不调用 ensureFilmstrip，转为视觉消费后触发", async () => {
+    const ensureFilmstrip = vi.fn().mockResolvedValue({ status: "failed" });
+    const filmstripMediaUrl = vi.fn();
+    const previousDesktop = (window as { desktop?: unknown }).desktop;
+    Object.defineProperty(window, "desktop", {
+      value: { ensureFilmstrip, filmstripMediaUrl },
+      configurable: true,
+    });
+    const baseDoc = (clipAssetKind: "audio" | "video", trackId: "A1" | "V1"): TimelineDocument => ({
+      schema_version: 1,
+      project_id: "project_1" as never,
+      canvas: { width: 1920, height: 1080, fps_num: 30, fps_den: 1, background_color: "#000000" },
+      tracks: [
+        { id: "C1", kind: "text", locked: false, hidden: false, muted: false, solo: false },
+        { id: "V1", kind: "video", locked: false, hidden: false, muted: false, solo: false },
+        { id: "A1", kind: "audio", locked: false, hidden: false, muted: false, solo: false },
+      ],
+      clips: [{
+        clip_id: "clip_1" as never,
+        track_id: trackId,
+        order_index: 0,
+        asset_id: "asset_4k_video" as never,
+        asset_kind: clipAssetKind,
+        source_start_us: 0,
+        source_end_us: 2_000_000,
+        timeline_start_us: 0,
+        timeline_end_us: 2_000_000,
+        layout: "fit",
+        audio: { enabled: true, gain_db: 0 },
+      }],
+      captions: [],
+      provenance: { created_by: "user", source_transcript_ids: [] },
+    });
+    const panelProps = (doc: TimelineDocument) => ({
+      projectId: "project_1",
+      document: doc,
+      selection: null,
+      setSelection: vi.fn(),
+      onPatch: vi.fn().mockResolvedValue(undefined),
+      onDropAsset: vi.fn(),
+      onReplaceAssetDrop: vi.fn().mockResolvedValue(undefined),
+      canUndo: false,
+      canRedo: false,
+      onUndo: vi.fn(),
+      onRedo: vi.fn(),
+      assetMedia: [{ asset_id: "asset_4k_video", kind: "video" as const, media_url: null, display_name: "4k.mp4", duration_us: 2_000_000 }],
+    });
+
+    try {
+      const view = render(createElement(TimelinePanel, panelProps(baseDoc("audio", "A1"))));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(ensureFilmstrip).not.toHaveBeenCalled();
+      expect(filmstripMediaUrl).not.toHaveBeenCalled();
+
+      view.rerender(createElement(TimelinePanel, panelProps(baseDoc("video", "V1"))));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(ensureFilmstrip).toHaveBeenCalledWith(expect.objectContaining({
+        project_id: "project_1",
+        asset_id: "asset_4k_video",
+      }));
+    } finally {
+      if (previousDesktop === undefined) {
+        delete (window as { desktop?: unknown }).desktop;
+      } else {
+        Object.defineProperty(window, "desktop", { value: previousDesktop, configurable: true });
+      }
+    }
   });
 });

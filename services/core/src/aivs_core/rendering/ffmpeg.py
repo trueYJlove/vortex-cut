@@ -324,7 +324,6 @@ def build_timeline_args(
         and ({"position", "opacity"} & set(item["segment"]["keyframes"]))
         for item in graph_items
     )
-    black_input_index = len(segments) if needs_black_input else -1
     width = int(plan["output"]["width"])
     height = int(plan["output"]["height"])
     # 帧率档（导出可选 24/25/30/60；预览恒 30）：plan["output"] 是唯一来源，
@@ -350,7 +349,21 @@ def build_timeline_args(
                     f"（{est_bytes / (1 << 30):.1f}GiB > 预算），请缩短片段或拆分倒放",
                 )
     args = ["-hide_banner", "-nostdin", "-y"]
+    ffmpeg_index_of: dict[int, int] = {}
+    next_input_index = 0
     for position, (segment, path) in enumerate(zip(segments, segment_paths, strict=True)):
+        probe = segment_probes[position]
+        is_silent_audio_role = segment.get("asset_kind") == "audio" and (
+            not segment.get("audio_enabled", True)
+            or bool(segment.get("reverse_playback"))
+            or not probe.get("audio_streams")
+            or _source_starts_past_eof(segment, probe)
+        )
+        if is_silent_audio_role:
+            # 静音音频段全部由 anullsrc 合成，彻底不打开源文件。
+            continue
+        ffmpeg_index_of[position] = next_input_index
+        next_input_index += 1
         # Video-backed audio clips each get an independent audio-role input.
         # Disable video at that input so FFmpeg never submits visual frames to
         # a decoder; a separate visual-role segment keeps its normal input/map.
@@ -365,7 +378,7 @@ def build_timeline_args(
             if window is not None and getattr(window, "eligible", False):
                 args += ["-ss", _seconds(int(window.seek_us))]
         args += ["-i", str(path)]
-    next_input_index = len(segments)
+    black_input_index = next_input_index if needs_black_input else -1
     if needs_black_input:
         # 与黑底填充段一致：给无限 color 源显式时长，避免 concat 图 EOF 死锁。
         black_duration = _seconds(max(timeline_total_us, 1))
@@ -424,13 +437,14 @@ def build_timeline_args(
         if segment["asset_kind"] == "video" and _source_starts_past_eof(segment, input_probe):
             base = f"color=c=black:s={width}x{height}:r={fps}:d={window_duration},setsar=1,fps={fps},format=yuv420p"
         else:
+            ff_idx = ffmpeg_index_of[input_index]
             if segment["asset_kind"] == "video":
                 head_us, tail_us = window_us if window_us is not None else (0, 0)
                 # C21a：精裁坐标回移——源绝对坐标减 seek 偏移（-ss 后流上的
                 # 相对坐标；0 时与旧图逐字符一致）。
                 start = _seconds(max(int(segment["source_start_us"]) + round(head_us * speed_milli / 1000) - seek_shift_us, 0))
                 end = _seconds(max(int(segment["source_end_us"]) - round(tail_us * speed_milli / 1000) - seek_shift_us, 0))
-                source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+                source = f"[{ff_idx}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
                 if reverse:
                     # 倒放：先反转帧序列；setpts 重置为从 0 起始的时间戳。
                     source += ",reverse,setpts=PTS-STARTPTS"
@@ -438,7 +452,7 @@ def build_timeline_args(
                     # 变速：PTS 除以速度倍率（>1 加速）。
                     source += f",setpts=PTS/{speed:.6f}"
             else:
-                source = f"[{input_index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
+                source = f"[{ff_idx}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
             reframe = segment.get("reframe")
             visual = (
                 _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
@@ -575,8 +589,9 @@ def build_timeline_args(
                     remaining /= 0.5
                 factors.append(remaining)
                 tempo_chain = ",".join(f"atempo={factor:.6f}" for factor in factors) + ","
+            ff_idx = ffmpeg_index_of[item["input_index"]]
             filters.append(
-                f"[{item['input_index']}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
+                f"[{ff_idx}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
                 "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                 f"{tempo_chain}volume={gain:.3f}dB{_fade_chain(segment, duration_us)},"
                 f"apad,atrim=duration={duration}[a{position}]"
@@ -790,8 +805,9 @@ def build_timeline_args(
             else:
                 # 淡入/淡出插在 volume 之后、apad 之前：afade 的 st/d 以本段
                 # 时间轴为准，apad 补长与 atrim 钉死都不改变已成的包络。
+                ff_idx = ffmpeg_index_of[index]
                 filters.append(
-                    f"[{index}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
+                    f"[{ff_idx}:a:0]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
                     "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
                     f"{tempo_chain}volume={gain:.3f}dB{_fade_chain(segment, a1_duration_us)},"
                     f"apad,atrim=duration={_seconds(a1_duration_us)},"
@@ -851,6 +867,7 @@ def build_timeline_args(
                         if pip_window is not None and getattr(pip_window, "eligible", False)
                         else 0
                     ),
+                    ffmpeg_index=ffmpeg_index_of[index],
                 )
             )
         video_label = main_label
@@ -1063,7 +1080,7 @@ def _mask_invert(expr, invert):
 
 def _pip_overlay_chain(
     segment, input_index, width, height, *, probe=None, enable_start_us, enable_end_us, main_label="MAINPIP",
-    seek_shift_us: int = 0,
+    seek_shift_us: int = 0, ffmpeg_index: int | None = None,
 ):
     """覆盖轨（画中画）片段子句：源取帧 -> 内容盒 -> transform(缩放/旋转) -> PTS 对齐
     -> overlay 时间窗叠加。
@@ -1132,17 +1149,18 @@ def _pip_overlay_chain(
     if segment["asset_kind"] == "video" and _source_starts_past_eof(segment, probe):
         head = f"color=c=black@0:s={pip_w}x{pip_h}:r=30:d={_seconds(duration_us)},format=rgba"
     else:
+        ff_idx = input_index if ffmpeg_index is None else ffmpeg_index
         if segment["asset_kind"] == "video":
             # C21b：PiP 源精裁坐标同主轨语义回移（-ss 后流上的相对坐标；0 = 旧图）。
             start = _seconds(max(int(segment["source_start_us"]) - seek_shift_us, 0))
             end = _seconds(max(int(segment["source_end_us"]) - seek_shift_us, 0))
-            source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+            source = f"[{ff_idx}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
             if reverse:
                 source += ",reverse,setpts=PTS-STARTPTS"
             if speed != 1.0:
                 source += f",setpts=PTS/{speed:.6f}"
         else:
-            source = f"[{input_index}:v:0]trim=duration={_seconds(duration_us)},setpts=PTS-STARTPTS"
+            source = f"[{ff_idx}:v:0]trim=duration={_seconds(duration_us)},setpts=PTS-STARTPTS"
         reframe = segment.get("reframe")
         if content_only:
             # 内容即元素：等比缩放到内容盒（无底、无黑边），区域外透明。
