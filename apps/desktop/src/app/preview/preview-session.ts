@@ -39,6 +39,19 @@ import { mediaRateIsPlayable } from "./media-rate.js";
  *  与导出侧 afade 同口径，语义见 audio-fade.ts。 */
 export interface SegmentAudioConfig { enabled: boolean; gainDb: number; fadeInUs?: number; fadeOutUs?: number }
 
+/** 判断合成器采样时是否需交换 UV 轴（P206/P212：原片 display_* 与 coded 宽高互换时交换；代理已烘焙方向，无需交换）。 */
+export function needsTextureAxisSwap(
+  geom: { width: number; height: number; display_width?: number; display_height?: number },
+  hasProxy: boolean,
+): boolean {
+  if (hasProxy) return false;
+  return geom.display_width !== undefined
+    && geom.display_height !== undefined
+    && geom.display_width === geom.height
+    && geom.display_height === geom.width
+    && geom.width !== geom.height;
+}
+
 /** 片段音频装备：worklet = 变速不变调（OLA 时域拉伸，M3-2.2 验收"声音变了"
  *  对齐项——交互预览 HTMLMediaElement preservesPitch 默认 true，合成预览
  *  playbackRate 直调变调）；legacy = playbackRate 直调（AudioWorklet 不可用
@@ -661,12 +674,7 @@ export class PreviewSession {
         // display matrix 换轴——用 IR geometry 判断（display_* 与 width/height
         // 互换即代表相差 90°）。
         const geom = input.geometry;
-        const planeSwapped = geom.display_width !== undefined
-          && geom.display_height !== undefined
-          && geom.display_width === geom.height
-          && geom.display_height === geom.width
-          && geom.width !== geom.height;
-        const texSwap = proxy ? false : planeSwapped;
+        const texSwap = needsTextureAxisSwap(geom, Boolean(proxy));
         return {
           inputId: input.input_id,
           sourceWidth: srcW,

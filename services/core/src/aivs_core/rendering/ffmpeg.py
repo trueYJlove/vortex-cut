@@ -1058,8 +1058,10 @@ def _pip_overlay_chain(
     streams = (probe or {}).get("video_streams") or []
     content_only = segment["layout"] in ("fit", "blurred_background") and bool(streams) and "reframe" not in segment
     if content_only:
-        coded_w = int(streams[0].get("width") or width)
-        coded_h = int(streams[0].get("height") or height)
+        raw_w = int(streams[0].get("width") or width)
+        raw_h = int(streams[0].get("height") or height)
+        rot = int(streams[0].get("rotation") or 0) % 360
+        coded_w, coded_h = (raw_h, raw_w) if rot in (90, 270) else (raw_w, raw_h)
         sar_text = str(streams[0].get("sample_aspect_ratio") or "1:1")
         try:
             sar_num, sar_den = sar_text.split(":")

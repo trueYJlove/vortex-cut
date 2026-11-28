@@ -17,11 +17,14 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from aivs_core.media.ffprobe import _rotation
 from aivs_core.media.proxy_profiles import coded_size, display_size, proxy_args
-from aivs_core.rendering.ir import _fit_content_box
+from aivs_core.rendering.ffmpeg import build_timeline_args
+from aivs_core.rendering.ir import _fit_content_box, project_preview_ir
 
 # ffprobe -show_streams 里排在 displaymatrix **之前**的项（iPhone 素材真实形态）。
 DOVI_ENTRY = {"side_data_type": "DOVI configuration record", "dv_profile": 8}
@@ -158,3 +161,133 @@ class TestFitContentBoxUsesDisplayOrientation:
             960,
             540,
         )
+
+
+class TestProjectPreviewIrVerticalFillsCanvas:
+    """P206 回归锁：3840×2160 竖拍（rotation=-90/270/90）在 9:16 竖画布必须铺满 540×960。"""
+
+    @staticmethod
+    def _run_ir(rotation: int, layout: str = "fit") -> dict:
+        plan = {
+            "schema_version": 1,
+            "compiler_version": "render-plan-v1",
+            "content_fingerprint": "sha256:p206",
+            "mode": "authoritative_preview",
+            "timeline_revision_id": "rev1",
+            "canvas_background_color": "#000000",
+            "output": {
+                "profile_id": "preview-916-v1",
+                "width": 540,
+                "height": 960,
+                "fps_num": 30,
+                "fps_den": 1,
+                "video_codec": "h264",
+                "audio_codec": "aac",
+                "audio_sample_rate": 48000,
+                "pixel_format": "yuv420p",
+            },
+            "inputs": [
+                {
+                    "input_id": "I0",
+                    "asset_id": "a0",
+                    "asset_kind": "video",
+                    "fingerprint": "fp0",
+                    "duration_us": 2_000_000,
+                    "has_audio": False,
+                }
+            ],
+            "segments": [
+                {
+                    "clip_id": "v1",
+                    "asset_id": "a0",
+                    "input_id": "I0",
+                    "track_id": "V1",
+                    "track_index": 0,
+                    "asset_kind": "video",
+                    "source_start_us": 0,
+                    "source_end_us": 1_000_000,
+                    "timeline_start_us": 0,
+                    "timeline_end_us": 1_000_000,
+                    "layout": layout,
+                    "audio_enabled": False,
+                    "gain_db": 0.0,
+                }
+            ],
+            "active_transitions": [],
+            "compatibility_transitions": [],
+            "captions": {"format": "ass", "preset_version": 1, "font_bundle_version": 1, "items": []},
+            "transitions": [],
+        }
+        probes = {
+            "a0": {
+                "video_streams": [
+                    {"width": 3840, "height": 2160, "sample_aspect_ratio": "1:1", "rotation": rotation}
+                ],
+                "audio_streams": [],
+            }
+        }
+        return project_preview_ir(plan, probes)
+
+    @pytest.mark.parametrize("rotation", [-90, 270, 90])
+    @pytest.mark.parametrize("layout", ["fit", "crop_fill"])
+    def test_vertical_rotation_fills_916_canvas(self, rotation: int, layout: str) -> None:
+        ir = self._run_ir(rotation, layout)
+        geom = ir["inputs"][0]["geometry"]
+        assert (geom["display_width"], geom["display_height"]) == (2160, 3840)
+        assert ir["frames"][0]["main"]["content"] == {"x": 0, "y": 0, "w": 540, "h": 960}
+        assert ir["frames"][0]["layers"][0]["box"] == {"x": 0, "y": 0, "w": 540, "h": 960}
+
+    def test_unrotated_landscape_letterboxes_in_916_canvas(self) -> None:
+        ir = self._run_ir(0, "fit")
+        assert ir["frames"][0]["main"]["content"] == {"x": 0, "y": 328, "w": 540, "h": 304}
+        assert ir["frames"][0]["layers"][0]["box"] == {"x": 0, "y": 328, "w": 540, "h": 304}
+
+
+class TestFfmpegPipOverlayUsesDisplayOrientation:
+    """P206 回归锁：ffmpeg _pip_overlay_chain 必须按 rotation∈{90,270} 换轴算内容盒。"""
+
+    @staticmethod
+    def _graph(rotation: int, *, on_v2: bool) -> str:
+        segments = []
+        paths = []
+        probes = []
+        if on_v2:
+            segments.append({
+                "clip_id": "v1", "track_id": "V1", "track_index": 1, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            })
+            paths.append(Path("base.mp4"))
+            probes.append({"video_streams": [{"width": 540, "height": 960, "sample_aspect_ratio": "1:1"}], "audio_streams": []})
+        segments.append({
+            "clip_id": "target", "track_id": "V2" if on_v2 else "V1", "track_index": 0,
+            "asset_kind": "video", "source_start_us": 0, "source_end_us": 1_000_000,
+            "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+            "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            "transform": {"x": 0.5, "y": 0.5, "scale": 1.0},
+        })
+        paths.append(Path("portrait.mp4"))
+        probes.append({
+            "video_streams": [{"width": 3840, "height": 2160, "sample_aspect_ratio": "1:1", "rotation": rotation}],
+            "audio_streams": [],
+        })
+        plan = {
+            "segments": segments,
+            "captions": {"items": []},
+            "output": {"width": 540, "height": 960, "fps_num": 30, "fps_den": 1},
+        }
+        args = build_timeline_args(plan, paths, probes, "libopenh264", "out.mp4", captions=False)
+        return args[args.index("-filter_complex") + 1]
+
+    @pytest.mark.parametrize("rotation", [-90, 270])
+    @pytest.mark.parametrize("on_v2", [True, False])
+    def test_rotated_portrait_scales_to_full_916_box(self, rotation: int, on_v2: bool) -> None:
+        graph = self._graph(rotation, on_v2=on_v2)
+        assert "scale=540:960:force_original_aspect_ratio=decrease" in graph
+        assert "overlay=x='0.0':y='0.0'" in graph
+
+    def test_unrotated_landscape_letterboxes_in_overlay_chain(self) -> None:
+        graph = self._graph(0, on_v2=True)
+        assert "scale=540:304:force_original_aspect_ratio=decrease" in graph
+        assert "overlay=x='0.0':y='328.0'" in graph

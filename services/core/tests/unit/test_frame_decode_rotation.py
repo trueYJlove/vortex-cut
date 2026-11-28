@@ -31,12 +31,15 @@ NV12 的 `width*height*1.5` 对宽高互换**恒等**（乘法可交换），所
 """
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from aivs_core.media.ffprobe import normalize_probe
 from aivs_core.media.frame_decode import decode_frames
+from aivs_core.rendering.ffmpeg import build_timeline_args
 
 REPO = Path(__file__).resolve().parents[4]
 FFMPEG = REPO / "resources" / "ffmpeg" / "win-x64" / "ffmpeg.exe"
@@ -145,3 +148,84 @@ def test_row_correlation_discriminates(rotated_fixture) -> None:
     assert good_corr > bad_corr + 0.1, (
         f"两种输出的相关度过于接近（good={good_corr:.3f} bad={bad_corr:.3f}）⇒ 判据无区分力"
     )
+
+
+def _probe_normalized(path: Path) -> dict:
+    proc = subprocess.run(
+        [str(FFPROBE), "-v", "error", "-print_format", "json", "-show_streams", str(path)],
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return normalize_probe(json.loads(proc.stdout), path)
+
+
+def _render_portrait_and_sample(tmp_path: Path, name: str, src: Path, probe: dict, *, on_v2: bool) -> bytes:
+    out = tmp_path / f"{name}.mp4"
+    segments = [
+        {
+            "clip_id": "c0",
+            "track_id": "V2" if on_v2 else "V1",
+            "track_index": 0,
+            "asset_kind": "video",
+            "source_start_us": 0,
+            "source_end_us": 1_000_000,
+            "timeline_start_us": 0,
+            "timeline_end_us": 1_000_000,
+            "layout": "fit",
+            "audio_enabled": False,
+            "gain_db": 0.0,
+            "transform": {"x": 0.5, "y": 0.5, "scale": 1.0},
+        }
+    ]
+    plan = {
+        "segments": segments,
+        "captions": {"items": []},
+        "output": {"width": 180, "height": 320, "fps_num": 30, "fps_den": 1},
+    }
+    args = build_timeline_args(plan, [src], [probe], "libopenh264", str(out), captions=False)
+    subprocess.run([str(FFMPEG), "-hide_banner", "-y", *args], check=True, capture_output=True)
+    raw = subprocess.run(
+        [str(FFMPEG), "-v", "error", "-ss", "0.5", "-i", str(out),
+         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        check=True, capture_output=True,
+    ).stdout
+    assert len(raw) == 180 * 320 * 3
+    return raw
+
+
+def _rgb_at(buf: bytes, x: int, y: int) -> tuple[int, int, int]:
+    idx = (y * 180 + x) * 3
+    return buf[idx], buf[idx + 1], buf[idx + 2]
+
+
+def test_rotated_portrait_ffmpeg_render_fills_916_canvas(tmp_path: Path) -> None:
+    """P206 真 FFmpeg 像素锁：rotation=-90 竖拍素材渲染到 9:16 竖画布必须四边铺满无黑边。"""
+    plain = tmp_path / "plain.mp4"
+    rot = tmp_path / "rot_neg90.mp4"
+    subprocess.run(
+        [str(FFMPEG), "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=30:d=1.0",
+         "-c:v", "libopenh264", "-b:v", "2M", "-pix_fmt", "yuv420p", "-an", "-y", str(plain)],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        [str(FFMPEG), "-v", "error", "-display_rotation", "-90", "-i", str(plain),
+         "-c", "copy", "-y", str(rot)],
+        check=True, capture_output=True,
+    )
+    rot_probe = _probe_normalized(rot)
+    plain_probe = _probe_normalized(plain)
+    assert rot_probe["video_streams"][0]["width"] == 320
+    assert rot_probe["video_streams"][0]["height"] == 180
+    assert rot_probe["video_streams"][0]["rotation"] in (90, 270)
+
+    for tag, on_v2 in [("v2", True), ("v1_tx", False)]:
+        buf = _render_portrait_and_sample(tmp_path, f"rot_{tag}", rot, rot_probe, on_v2=on_v2)
+        for px, py in [(90, 8), (90, 312), (8, 160), (172, 160)]:
+            r, g, b = _rgb_at(buf, px, py)
+            assert b > 180 and r < 40 and g < 40, f"{tag} ({px},{py})={(r,g,b)}"
+
+    # 负向对照：未旋转横拍 320×180 在 180×320 竖画布上下留黑、仅中心为蓝
+    plain_buf = _render_portrait_and_sample(tmp_path, "plain_neg", plain, plain_probe, on_v2=True)
+    for px, py in [(90, 8), (90, 312)]:
+        assert max(_rgb_at(plain_buf, px, py)) < 20
+    _, _, cb = _rgb_at(plain_buf, 90, 160)
+    assert cb > 180
