@@ -83,7 +83,6 @@
 | P235-R3 | 转场来源事实与最终布局投影 | 风险对策 | 🟡 架构已冻结，实现及测试未闭环 | [`BACKLOG#p235-r3`](BACKLOG.md#p235-r3) |
 | P235-R4 | HTML `page` 时间线功能与隔离渲染 | 风险对策 | ⏸ 2026-11-28 用户裁决挂起：保留架构与 Schema 预留，移出 P235 验收（P237 D2） | [`BACKLOG#p235-r4`](BACKLOG.md#p235-r4) |
 | P231 | 全视觉轨画布盒模型重构 | 工作包 | 🟡 主体已落地，缺 A2 ffmpeg/IR 逐像素对拍补证 | [`BACKLOG#p231`](BACKLOG.md#p231) |
-| P230 | 时间线/预览五项 OpenFilm 观察 | 工作包 | 🟡 ①②③⑤ 已落地，④ 已分立 P231 | [`BACKLOG#p230`](BACKLOG.md#p230) |
 | P227 | WebGPU 合成器与假硬解提示 | 工作包 | ⏳ 代码已合入（`VITE_AIVS_GPU=1` 门控），待真机矩阵核销 | [`BACKLOG#p227`](BACKLOG.md#p227) |
 | P196 | 42 份设计门遗留对账收口 | 工作包 | 🟡 5 项已落实，长时线项转 P200 | [`BACKLOG#p196`](BACKLOG.md#p196) |
 | P197 | B13-R `textureBytesOf` 记账口径 | 工作包 | 🟡 显式挂起（待 Chromium 上游修复或自建补丁） | [`BACKLOG#p197`](BACKLOG.md#p197) |

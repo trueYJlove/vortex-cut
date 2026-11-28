@@ -47,6 +47,7 @@ A1  音频轨（audio）                   ┘
 - **滚轮策略**：`Ctrl+滚轮` 以光标为锚缩放；普通滚轮纵向滚动（纵向未溢出时横向平移）；`Shift` / 触摸板横向滑动横向平移。
 - **拖拽与播放头**：单片段拖动时本体实时跟随鼠标并按目标轨钳制不重叠；组移动保留半透明 ghost；鼠标在空白位置按住即可拖动播放头，`Shift+拖拽` 保留框选。
 - **波形与缩略图**：音频波形占比三档（100%/60%/30%）持久化至 `vortex-cut.timeline.prefs.v1`；视频缩略图优先走素材级 Filmstrip Sprite（见 [`preview-and-rendering.md`](preview-and-rendering.md) §3）。
+- **工作区与轨道视觉基线**：编辑工作区采用左栏素材库纵贯全高、右列垂直堆叠「预览 + 属性」与时间线的双栏布局；轨头列底色 `--bg-panel`、轨头行 `--tl-row`（选中 `--tl-lane-on`）与画布泳道带同步保持 2px 缝隙可读；标尺顶部无额外内容范围粗线；片段选中框采用纯描边透明底；缩略图运行时兜底保持 `±400px` 视口余量、同素材 busy 重排队不丢弃，且连续 3 次帧级失败自动降级为 `video` seek 兜底。
 - **进行中对齐计划**：完整视觉/交互/功能/性能对齐详见 [`../plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](../plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md)。
 
 ---
