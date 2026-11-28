@@ -1658,7 +1658,7 @@ class TimelineService:
             new_start = _integer(operation.get("source_start_us"), "源开始时间不合法")
             new_end = _integer(operation.get("source_end_us"), "源结束时间不合法")
             anchor = _enum(operation.get("anchor"), {"start", "end", "timeline"}, "编辑锚点不合法")
-            if new_start < 0 or new_end - new_start < MIN_VIDEO_US:
+            if new_start < 0 or new_end - new_start < MIN_VIDEO_US or new_end > MAX_IMAGE_US:
                 raise DomainError("TIMELINE_INVALID", "素材源范围必须至少为 100ms")
 
             for member in _clip_link_members(document, clip):
@@ -1670,7 +1670,12 @@ class TimelineService:
                 asset = self._asset(db, project_id, member["asset_id"])
                 media = json_loads(asset["media_info_json"]) if asset["media_info_json"] else {}
                 asset_duration = media.get("duration_us")
-                if not isinstance(asset_duration, int) or new_end > asset_duration:
+                if isinstance(asset_duration, bool) or (
+                    asset_duration is not None and not isinstance(asset_duration, int)
+                ):
+                    raise DomainError("TIMELINE_SOURCE_INVALID", "素材源范围超出原始素材时长")
+                duration_known = asset_duration is not None and asset_duration > 0
+                if duration_known and (asset_duration < MIN_VIDEO_US or new_end > asset_duration):
                     raise DomainError("TIMELINE_SOURCE_INVALID", "素材源范围超出原始素材时长")
 
                 old_start = member["timeline_start_us"]

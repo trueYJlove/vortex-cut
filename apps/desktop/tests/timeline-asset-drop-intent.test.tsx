@@ -247,4 +247,89 @@ describe("asset drop intent parity", () => {
     expect(takeSystemFileDrop()).toEqual([]);
     expect(p.onReplaceAssetDrop).not.toHaveBeenCalled();
   });
+
+  it("P235-R1：center Replace 支持无音轨视频落入音轨并按目标/已知时长锚定预览区间", () => {
+    const audioClip = {
+      clip_id: "clip_audio_1" as never,
+      track_id: "A1",
+      order_index: 0,
+      asset_id: "asset_audio" as never,
+      asset_kind: "audio" as const,
+      source_start_us: 0,
+      source_end_us: 4_000_000,
+      timeline_start_us: 1_000_000,
+      timeline_end_us: 5_000_000,
+      layout: "fit" as const,
+      audio: { enabled: true, gain_db: 0 },
+    };
+    const videoOnAudioIntent = resolveTimelineAssetDropIntent({
+      hit: { trackId: "A1", band: "body", clipId: audioClip.clip_id, zone: "replace" },
+      clips: [audioClip],
+      tracks: documentFixture.tracks,
+      assetKinds: ["video"],
+      assetDurationsUs: [null],
+      itemCount: 1,
+      canReplace: true,
+      pointerUs: 2_800_000,
+      fpsNum: 30,
+      fpsDen: 1,
+    });
+    expect(videoOnAudioIntent).toMatchObject({
+      accepts: true,
+      zone: "center",
+      trackId: "A1",
+      targetClipId: audioClip.clip_id,
+      atUs: 1_000_000,
+      previewDurationUs: 4_000_000,
+    });
+
+    const shortSourceIntent = resolveTimelineAssetDropIntent({
+      hit: { trackId: "V1", band: "body", clipId: videoClip.clip_id, zone: "replace" },
+      clips: [videoClip],
+      tracks: documentFixture.tracks,
+      assetKinds: ["video"],
+      assetDurationsUs: [900_000],
+      itemCount: 1,
+      canReplace: true,
+      pointerUs: 1_200_000,
+      fpsNum: 30,
+      fpsDen: 1,
+    });
+    expect(shortSourceIntent).toMatchObject({
+      accepts: true,
+      atUs: 0,
+      previewDurationUs: 900_000,
+    });
+
+    const longStillClip = {
+      clip_id: "clip_still_45s" as never,
+      track_id: "V1",
+      order_index: 0,
+      asset_id: "asset_still_old" as never,
+      asset_kind: "image" as const,
+      source_start_us: null,
+      source_end_us: null,
+      timeline_start_us: 0,
+      timeline_end_us: 45_000_000,
+      layout: "fit" as const,
+      audio: { enabled: false, gain_db: 0 },
+    };
+    const longStillIntent = resolveTimelineAssetDropIntent({
+      hit: { trackId: "V1", band: "body", clipId: longStillClip.clip_id, zone: "replace" },
+      clips: [longStillClip],
+      tracks: documentFixture.tracks,
+      assetKinds: ["image"],
+      assetDurationsUs: [0],
+      itemCount: 1,
+      canReplace: true,
+      pointerUs: 10_000_000,
+      fpsNum: 30,
+      fpsDen: 1,
+    });
+    expect(longStillIntent).toMatchObject({
+      accepts: true,
+      atUs: 0,
+      previewDurationUs: 45_000_000,
+    });
+  });
 });

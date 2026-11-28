@@ -156,6 +156,17 @@ def test_replace_silent_video_on_audio_clip_and_long_image_duration(tmp_path: Pa
     assert replaced_audio["audio"]["enabled"] is True
     assert replaced_audio["timeline_start_us"] == 0
     assert replaced_audio["timeline_end_us"] == 2_000_000
+    # P235-R1：无音轨视频替换到音轨后仍保持音频片段可编辑语义（增益/淡变/修剪/变速）及撤销链路。
+    edited_audio_state = _patch(service, audio_state, [
+        {"op": "set_audio", "clip_id": replaced_audio["clip_id"], "enabled": True, "gain_db": -6.0, "fade_in_us": 200_000, "fade_out_us": 300_000},
+        {"op": "trim_clip", "clip_id": replaced_audio["clip_id"], "source_start_us": 200_000, "source_end_us": 1_800_000},
+        {"op": "set_speed", "clip_id": replaced_audio["clip_id"], "speed_milli": 2000},
+    ])
+    edited_clip = edited_audio_state["current_revision"]["document"]["clips"][0]
+    assert edited_clip["audio"] == {"enabled": True, "gain_db": -6.0, "fade_in_us": 200_000, "fade_out_us": 300_000}
+    assert edited_clip["timeline_end_us"] - edited_clip["timeline_start_us"] == 800_000
+    undone_audio = service.undo("p1", edited_audio_state["current_revision"]["timeline_revision_id"])
+    assert undone_audio["current_revision"]["document"]["clips"][0]["audio"]["gain_db"] == 0.0
 
     image_service, image_database = _service(tmp_path / "image")
     with image_database.connection() as db:
@@ -302,6 +313,36 @@ def test_replace_unknown_duration_uses_target_source_window(tmp_path: Path) -> N
     assert replaced_audio["asset_id"] == "a-zero-duration"
     assert (replaced_audio["source_start_us"], replaced_audio["source_end_us"]) == (0, 8_000_000)
     assert replaced_audio["timeline_end_us"] == 8_000_000
+
+    # P235-R1：未知时长（None / 0）在 Replace 后允许 set_clip_source_window（滑移/首尾锚）并保持 undo/redo 一致。
+    slip_state = _patch(service, audio_state, [{
+        "op": "set_clip_source_window",
+        "clip_id": replaced_audio["clip_id"],
+        "source_start_us": 1_000_000,
+        "source_end_us": 9_000_000,
+        "anchor": "timeline",
+    }])
+    slipped_audio = next(
+        c for c in slip_state["current_revision"]["document"]["clips"]
+        if c["clip_id"] == replaced_audio["clip_id"]
+    )
+    assert (slipped_audio["source_start_us"], slipped_audio["source_end_us"]) == (1_000_000, 9_000_000)
+    assert (slipped_audio["timeline_start_us"], slipped_audio["timeline_end_us"]) == (0, 8_000_000)
+    with pytest.raises(DomainError) as window_overflow:
+        _patch(service, slip_state, [{
+            "op": "set_clip_source_window",
+            "clip_id": replaced_audio["clip_id"],
+            "source_start_us": 0,
+            "source_end_us": MAX_IMAGE_US + 1,
+            "anchor": "start",
+        }])
+    assert window_overflow.value.code == "TIMELINE_INVALID"
+    undone_slip = service.undo("p1", slip_state["current_revision"]["timeline_revision_id"])
+    reverted_audio = next(
+        c for c in undone_slip["current_revision"]["document"]["clips"]
+        if c["clip_id"] == replaced_audio["clip_id"]
+    )
+    assert (reverted_audio["source_start_us"], reverted_audio["source_end_us"]) == (0, 8_000_000)
 
 
 def test_replace_unknown_duration_enforces_minimum_and_safe_source_end(tmp_path: Path) -> None:

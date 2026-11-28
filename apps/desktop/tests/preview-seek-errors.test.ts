@@ -106,6 +106,28 @@ describe("W1 DEFECT-4K60-SEEK：seek 失败落定不外抛", () => {
     expect(session.metrics().last_error).toBeNull();
     session.dispose();
   });
+
+  it("真实 EOF 缺帧（±1 邻帧均缺失）时返回 -1、不降级后端并统一报告 SOURCE_EOF 边界", async () => {
+    const { session, decode } = await readySession();
+    const originalPost = decode.postMessage.bind(decode);
+    decode.postMessage = (message: any) => {
+      if (message.type === "decode") {
+        queueMicrotask(() => decode.reply({
+          type: "error",
+          id: message.id,
+          message: `no sample for frame ${message.frameN} (best diff 900000us)`,
+        }));
+      } else {
+        originalPost(message);
+      }
+    };
+    const result = await session.seekToFrame(10);
+    expect(result).toBe(-1);
+    expect(session.metrics().decode_backend).toBe("webcodecs");
+    expect(session.metrics().last_error).toContain("SOURCE_EOF:");
+    expect(session.metrics().last_error).toContain("seek 解码失败 frame 10");
+    session.dispose();
+  });
 });
 
 /** decode 桩回最小 VideoFrame（upload 请求可发生）。 */

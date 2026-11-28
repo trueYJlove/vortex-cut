@@ -161,6 +161,34 @@ def _keyframe_animation_filters(
     return clauses
 
 
+def _probe_duration_us(probe: dict[str, Any] | None) -> int | None:
+    if not isinstance(probe, dict):
+        return None
+    value = probe.get("duration_us")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _source_starts_past_eof(segment: dict[str, Any], probe: dict[str, Any] | None) -> bool:
+    probe_dur = _probe_duration_us(probe)
+    return probe_dur is not None and int(segment.get("source_start_us") or 0) >= probe_dur
+
+
+def _video_needs_eof_pad(
+    segment: dict[str, Any],
+    probe: dict[str, Any] | None,
+    plan_input_duration_us: int | None = None,
+) -> bool:
+    if segment.get("asset_kind") != "video":
+        return False
+    source_end_us = int(segment.get("source_end_us") or 0)
+    if isinstance(probe, dict) and "duration_us" in probe:
+        probe_dur = _probe_duration_us(probe)
+        return probe_dur is None or probe_dur < source_end_us
+    return plan_input_duration_us == 0
+
+
 def build_timeline_args(
     plan: dict[str, Any],
     segment_paths: list[Path],
@@ -361,6 +389,11 @@ def build_timeline_args(
     filters: list[str] = []
     concat_inputs = []
     label_seq = [0]
+    input_duration_by_id = {
+        item["input_id"]: item.get("duration_us")
+        for item in plan.get("inputs", [])
+        if isinstance(item, dict) and "input_id" in item
+    }
 
     def visual_chain(
         segment: dict[str, Any], input_index: int, out_label: str,
@@ -383,28 +416,38 @@ def build_timeline_args(
         reverse = bool(segment.get("reverse_playback", False))
         duration_us = segment["timeline_end_us"] - segment["timeline_start_us"]
         duration = _seconds(duration_us)
-        if segment["asset_kind"] == "video":
-            head_us, tail_us = window_us if window_us is not None else (0, 0)
-            # C21a：精裁坐标回移——源绝对坐标减 seek 偏移（-ss 后流上的
-            # 相对坐标；0 时与旧图逐字符一致）。
-            start = _seconds(max(int(segment["source_start_us"]) + round(head_us * speed_milli / 1000) - seek_shift_us, 0))
-            end = _seconds(max(int(segment["source_end_us"]) - round(tail_us * speed_milli / 1000) - seek_shift_us, 0))
-            source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
-            if reverse:
-                # 倒放：先反转帧序列；setpts 重置为从 0 起始的时间戳。
-                source += ",reverse,setpts=PTS-STARTPTS"
-            if speed != 1.0:
-                # 变速：PTS 除以速度倍率（>1 加速）。
-                source += f",setpts=PTS/{speed:.6f}"
-        else:
-            source = f"[{input_index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
-        reframe = segment.get("reframe")
-        visual = (
-            _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
-            if isinstance(reframe, dict)
-            else _visual_filter(segment["layout"], width, height, label_id)
+        window_duration_us = (
+            duration_us if window_us is None else max(1, duration_us - int(window_us[0]) - int(window_us[1]))
         )
-        base = f"{source},{_square_pixel_filter()},{visual},setsar=1,fps={fps},format=yuv420p"
+        window_duration = _seconds(window_duration_us)
+        input_probe = segment_probes[input_index]
+        if segment["asset_kind"] == "video" and _source_starts_past_eof(segment, input_probe):
+            base = f"color=c=black:s={width}x{height}:r={fps}:d={window_duration},setsar=1,fps={fps},format=yuv420p"
+        else:
+            if segment["asset_kind"] == "video":
+                head_us, tail_us = window_us if window_us is not None else (0, 0)
+                # C21a：精裁坐标回移——源绝对坐标减 seek 偏移（-ss 后流上的
+                # 相对坐标；0 时与旧图逐字符一致）。
+                start = _seconds(max(int(segment["source_start_us"]) + round(head_us * speed_milli / 1000) - seek_shift_us, 0))
+                end = _seconds(max(int(segment["source_end_us"]) - round(tail_us * speed_milli / 1000) - seek_shift_us, 0))
+                source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+                if reverse:
+                    # 倒放：先反转帧序列；setpts 重置为从 0 起始的时间戳。
+                    source += ",reverse,setpts=PTS-STARTPTS"
+                if speed != 1.0:
+                    # 变速：PTS 除以速度倍率（>1 加速）。
+                    source += f",setpts=PTS/{speed:.6f}"
+            else:
+                source = f"[{input_index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS"
+            reframe = segment.get("reframe")
+            visual = (
+                _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
+                if isinstance(reframe, dict)
+                else _visual_filter(segment["layout"], width, height, label_id)
+            )
+            base = f"{source},{_square_pixel_filter()},{visual},setsar=1,fps={fps},format=yuv420p"
+            if _video_needs_eof_pad(segment, input_probe, input_duration_by_id.get(segment.get("input_id"))):
+                base += f",tpad=stop_mode=add:stop_duration={window_duration}:color=black,trim=duration={window_duration},setpts=PTS-STARTPTS"
         # P1 扩展：静态画面变换（transform，中心点语义）对主轨（V1）与所有视觉
         # 片段生效——缩放至目标尺寸（可选旋转）后叠到全幅黑底；透明度 <1 时走
         # rgba + colorchannelmixer。变换先后：关键帧动画在前，静态变换在后
@@ -513,6 +556,7 @@ def build_timeline_args(
             and has_audio
             and segment["audio_enabled"]
             and not reverse
+            and not _source_starts_past_eof(segment, probe)
         ):
             # C21a：音频精裁坐标与视频同一窗口回移（实证对拍：A/V 偏差不变）。
             start = _seconds(max(int(segment["source_start_us"]) - seek_shift_us, 0))
@@ -732,7 +776,11 @@ def build_timeline_args(
                 tempo_chain = ",".join(f"atempo={factor:.6f}" for factor in factors) + ","
             delay_ms = int(segment["timeline_start_us"]) // 1000
             a1_duration_us = int(segment["timeline_end_us"]) - int(segment["timeline_start_us"])
-            if segment.get("reverse_playback") or not probe.get("audio_streams"):
+            if (
+                segment.get("reverse_playback")
+                or not probe.get("audio_streams")
+                or _source_starts_past_eof(segment, probe)
+            ):
                 # 倒放/无音轨：静音占位（保证 amix 输入数稳定）。
                 filters.append(
                     "anullsrc=channel_layout=stereo:sample_rate=48000,"
@@ -1080,29 +1128,34 @@ def _pip_overlay_chain(
     speed_milli = int(segment.get("speed_milli", 1000))
     speed = speed_milli / 1000
     reverse = bool(segment.get("reverse_playback", False))
-    if segment["asset_kind"] == "video":
-        # C21b：PiP 源精裁坐标同主轨语义回移（-ss 后流上的相对坐标；0 = 旧图）。
-        start = _seconds(max(int(segment["source_start_us"]) - seek_shift_us, 0))
-        end = _seconds(max(int(segment["source_end_us"]) - seek_shift_us, 0))
-        source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
-        if reverse:
-            source += ",reverse,setpts=PTS-STARTPTS"
-        if speed != 1.0:
-            source += f",setpts=PTS/{speed:.6f}"
-    else:
-        source = f"[{input_index}:v:0]trim=duration={_seconds(duration_us)},setpts=PTS-STARTPTS"
-    reframe = segment.get("reframe")
-    if content_only:
-        # 内容即元素：等比缩放到内容盒（无底、无黑边），区域外透明。
-        visual = f"scale={content_w}:{content_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1"
-    else:
-        visual = (
-            _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
-            if isinstance(reframe, dict)
-            else _visual_filter(segment["layout"], width, height, 901 + input_index)
-        )
     label = f"pip{input_index}"
-    head = f"{source},{_square_pixel_filter()},{visual},scale={pip_w}:{pip_h}:force_divisible_by=2"
+    if segment["asset_kind"] == "video" and _source_starts_past_eof(segment, probe):
+        head = f"color=c=black@0:s={pip_w}x{pip_h}:r=30:d={_seconds(duration_us)},format=rgba"
+    else:
+        if segment["asset_kind"] == "video":
+            # C21b：PiP 源精裁坐标同主轨语义回移（-ss 后流上的相对坐标；0 = 旧图）。
+            start = _seconds(max(int(segment["source_start_us"]) - seek_shift_us, 0))
+            end = _seconds(max(int(segment["source_end_us"]) - seek_shift_us, 0))
+            source = f"[{input_index}:v:0]trim=start={start}:end={end},setpts=PTS-STARTPTS"
+            if reverse:
+                source += ",reverse,setpts=PTS-STARTPTS"
+            if speed != 1.0:
+                source += f",setpts=PTS/{speed:.6f}"
+        else:
+            source = f"[{input_index}:v:0]trim=duration={_seconds(duration_us)},setpts=PTS-STARTPTS"
+        reframe = segment.get("reframe")
+        if content_only:
+            # 内容即元素：等比缩放到内容盒（无底、无黑边），区域外透明。
+            visual = f"scale={content_w}:{content_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1"
+        else:
+            visual = (
+                _reframe_crop_filter(width, height, reframe["crop_x"], reframe["crop_y"])
+                if isinstance(reframe, dict)
+                else _visual_filter(segment["layout"], width, height, 901 + input_index)
+            )
+        head = f"{source},{_square_pixel_filter()},{visual},scale={pip_w}:{pip_h}:force_divisible_by=2"
+        if _video_needs_eof_pad(segment, probe):
+            head += f",tpad=stop_mode=add:stop_duration={_seconds(duration_us)}:color=black,trim=duration={_seconds(duration_us)},setpts=PTS-STARTPTS"
     has_rotate_kf = bool(keyframes and "rotate" in keyframes)
     has_rotate = rotate_val != 0.0 or has_rotate_kf
     if has_rotate_kf:

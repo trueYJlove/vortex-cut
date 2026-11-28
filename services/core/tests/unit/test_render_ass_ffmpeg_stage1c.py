@@ -1372,3 +1372,61 @@ def test_p231_pip_overlay_chain_supports_opacity_and_keyframes() -> None:
     assert "fade=alpha=1:st=0.000000:d=1.000000[pip1kop]" in graph
     assert "*PI/180':fillcolor=black@0:ow=iw:oh=ih" in graph
     assert "(t-0.500000)" in graph
+
+
+@pytest.mark.parametrize(
+    "probe_duration_us",
+    [0, 1_000_000],
+)
+def test_p235_r1_unknown_or_short_duration_pads_video_eof_to_black(probe_duration_us: int) -> None:
+    """P235-R1：未知时长（duration_us=0）或真实提前 EOF（duration_us < source_end_us）走 tpad 黑底保长。"""
+    plan = {
+        "inputs": [{"input_id": "I0", "asset_id": "v1", "asset_kind": "video", "duration_us": 0, "has_audio": False}],
+        "segments": [{
+            "clip_id": "v1", "input_id": "I0", "track_id": "V1", "track_index": 0, "asset_kind": "video",
+            "source_start_us": 0, "source_end_us": 3_000_000,
+            "timeline_start_us": 0, "timeline_end_us": 3_000_000,
+            "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+        }],
+        "captions": {"items": []},
+        "output": {"width": 320, "height": 180, "fps_num": 30, "fps_den": 1},
+    }
+    probes = [{"duration_us": probe_duration_us, "video_streams": [{"width": 320, "height": 180}], "audio_streams": []}]
+    args = build_timeline_args(plan, [Path("short.mp4")], probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "tpad=stop_mode=add:stop_duration=3.000000:color=black,trim=duration=3.000000,setpts=PTS-STARTPTS" in graph
+
+
+def test_p235_r1_source_starting_past_eof_uses_black_and_silence() -> None:
+    """P235-R1：source_start_us >= probe.duration_us 时避免空 trim/atrim 失败，直接输出黑场与静音。"""
+    plan = {
+        "inputs": [{"input_id": "I0", "asset_id": "v1", "asset_kind": "video", "duration_us": 0, "has_audio": True}],
+        "segments": [
+            {
+                "clip_id": "v1", "input_id": "I0", "track_id": "V1", "track_index": 0, "asset_kind": "video",
+                "source_start_us": 1_500_000, "source_end_us": 3_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 1_500_000,
+                "layout": "fit", "audio_enabled": True, "gain_db": 0.0,
+            },
+            {
+                "clip_id": "a1", "input_id": "I0", "track_id": "A1", "track_index": 1, "asset_kind": "audio",
+                "source_asset_kind": "audio",
+                "source_start_us": 1_500_000, "source_end_us": 3_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 1_500_000,
+                "layout": "fit", "audio_enabled": True, "audio_required": True, "has_audio": True, "gain_db": 0.0,
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 320, "height": 180, "fps_num": 30, "fps_den": 1},
+    }
+    probes = [
+        {"duration_us": 1_000_000, "video_streams": [{"width": 320, "height": 180}], "audio_streams": [{}]},
+        {"duration_us": 1_000_000, "video_streams": [], "audio_streams": [{}]},
+    ]
+    args = build_timeline_args(plan, [Path("v.mp4"), Path("a.wav")], probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "color=c=black:s=320x180:r=30:d=1.500000" in graph
+    assert "[0:v:0]" not in graph
+    assert "[0:a:0]" not in graph
+    assert "[1:a:0]" not in graph
+    assert "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=1.500000,asetpts=PTS-STARTPTS[a1s0]" in graph

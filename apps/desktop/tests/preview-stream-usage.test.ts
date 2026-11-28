@@ -207,4 +207,64 @@ describe("preview stream usage", () => {
     })]);
     session.dispose();
   });
+
+  it("long silent video-as-audio (>=30s) skips audio rig creation and PCM chunk streaming requests", async () => {
+    const ensurePcmChunk = vi.fn();
+    const pcmChunkMediaUrl = vi.fn();
+    const fetchMock = vi.fn();
+    class FakeAudioContext {
+      sampleRate = 48_000;
+      destination = {};
+      currentTime = 0;
+      audioWorklet = undefined;
+      resume = vi.fn().mockResolvedValue(undefined);
+      close = vi.fn().mockResolvedValue(undefined);
+      createAnalyser = vi.fn(() => ({ fftSize: 2048, connect: vi.fn(), disconnect: vi.fn() }));
+      createGain = vi.fn(() => ({ gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }));
+    }
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+    vi.stubGlobal("fetch", fetchMock);
+    const previousDesktop = (window as { desktop?: unknown }).desktop;
+    Object.defineProperty(window, "desktop", {
+      value: { ensurePcmChunk, pcmChunkMediaUrl },
+      configurable: true,
+    });
+
+    try {
+      const ir = streamUsageIr({
+        asset_id: "asset_long_silent",
+        duration_us: 60_000_000,
+        has_audio: false,
+        audio_required: false,
+        video_required: false,
+        geometry: { width: 0, height: 0, sar: 1 },
+      }, false);
+      const session = await PreviewSession.create(
+        document.createElement("div"),
+        ir,
+        new Map(),
+        new Map([["clip_audio", { enabled: true, gainDb: 0 }]]),
+        undefined,
+        undefined,
+        "balanced",
+        "project_1",
+      );
+      const internals = session as unknown as {
+        audioRigs: Map<string, unknown>;
+        syncAudio: (tUs: number) => void;
+      };
+      internals.syncAudio(500_000);
+      expect(internals.audioRigs.size).toBe(0);
+      expect(ensurePcmChunk).not.toHaveBeenCalled();
+      expect(pcmChunkMediaUrl).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      session.dispose();
+    } finally {
+      if (previousDesktop === undefined) {
+        delete (window as { desktop?: unknown }).desktop;
+      } else {
+        Object.defineProperty(window, "desktop", { value: previousDesktop, configurable: true });
+      }
+    }
+  });
 });

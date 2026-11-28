@@ -97,7 +97,7 @@ export function resolveTimelineAssetDropIntent(input: TimelineAssetDropIntentInp
 
   const pointerUs = snapAssetDropUs(Math.max(0, Number.isFinite(input.pointerUs) ? input.pointerUs : 0), input.fpsNum, input.fpsDen);
   const rowClips = row ? input.clips.filter(clip => clip.track_id === row.id).sort((a, b) => a.timeline_start_us - b.timeline_start_us) : [];
-  const rawAtUs = boundary === "before" && targetClip ? targetClip.timeline_start_us
+  const rawAtUs = (boundary === "before" || (zone === "center" && input.itemCount === 1)) && targetClip ? targetClip.timeline_start_us
     : boundary === "after" && targetClip ? targetClip.timeline_end_us
       : pointerUs;
   let atUs = snapAssetDropUs(rawAtUs, input.fpsNum, input.fpsDen);
@@ -122,7 +122,20 @@ export function resolveTimelineAssetDropIntent(input: TimelineAssetDropIntentInp
     const measured = input.assetDurationsUs?.[index];
     return measured != null && Number.isFinite(measured) && measured > 0 ? measured : kind === "image" ? 4_000_000 : 1_000_000;
   }) ?? [];
-  const previewDurationUs = itemDurations.reduce((sum, duration) => sum + duration, 0) + Math.max(0, itemDurations.length - 1) * frameUs;
+  let previewDurationUs = itemDurations.reduce((sum, duration) => sum + duration, 0) + Math.max(0, itemDurations.length - 1) * frameUs;
+  if (zone === "center" && input.itemCount === 1 && targetClip && accepts) {
+    const targetDurationUs = Math.max(0, targetClip.timeline_end_us - targetClip.timeline_start_us);
+    const incomingKind = kinds?.[0];
+    const measured = input.assetDurationsUs?.[0];
+    if (incomingKind === "image") {
+      previewDurationUs = targetDurationUs;
+    } else if (measured != null && Number.isFinite(measured) && measured > 0) {
+      const speedMilli = targetClip.speed_milli ?? 1000;
+      previewDurationUs = Math.min(targetDurationUs, Math.round((measured * 1000) / speedMilli));
+    } else {
+      previewDurationUs = targetDurationUs;
+    }
+  }
   const slot = rowClips.length
     ? rowClips.filter(clip => clip.timeline_start_us < atUs).length
     : Math.max(0, input.defaultSlot ?? 0);

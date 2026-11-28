@@ -845,6 +845,8 @@ export class PreviewSession {
       }
       for (const segment of ir.segments) {
         if (!audioByClip.get(segment.clip_id)?.enabled) continue;
+        const input = ir.inputs.find(item => item.input_id === segment.input_id);
+        if (!input?.has_audio) continue;
         // 装配时全局倍速恒为 1（setPlayRate 只在会话就绪后到来）——
         // effectiveRigSpeed 此时与段速相等，写法统一便于换率路径复用。
         session.audioRigs.set(segment.clip_id, makeAudioRig(session.effectiveRigSpeed(segment.speed_milli / 1000)));
@@ -1448,7 +1450,8 @@ export class PreviewSession {
           // 旧实现把这类素材边界当故障：既刷「最近错误」横幅，又把它算进降级
           // 判据。改为向相邻帧各试一次，拿到就按请求位（srcN）入环——画面定格
           // 在端帧，播放继续，不产生错误状态。
-          if (/DECODE_FRAME_NOT_FOUND|no sample for frame/i.test(message)) {
+          const isEofBoundary = /DECODE_FRAME_NOT_FOUND|no sample for frame/i.test(message);
+          if (isEofBoundary) {
             for (const fallback of [srcN - 1, srcN + 1]) {
               if (fallback < 0) continue;
               if (this.disposed || epoch !== this.seekEpoch || generation !== rig.chainGeneration) break;
@@ -1460,8 +1463,14 @@ export class PreviewSession {
             }
           }
           if (!decoded!) {
-            if (this.disposed || !(await this.maybeFallBackToFfmpeg(rig, error))) throw error;
-            decoded = await this.decodeInput(rig, inputId, srcN);
+            if (this.disposed) throw error;
+            if (await this.maybeFallBackToFfmpeg(rig, error)) {
+              decoded = await this.decodeInput(rig, inputId, srcN);
+            } else if (isEofBoundary) {
+              throw new Error(`SOURCE_EOF: 输入 ${inputId} 在源帧 #${srcN} 处到达真实媒体结尾（已截短/缺帧）`);
+            } else {
+              throw error;
+            }
           }
         }
         const decodeMs = performance.now() - decodeStart;
@@ -2229,6 +2238,8 @@ export class PreviewSession {
       for (const segment of this.ir.segments) {
         const cfg = this.audioByClip.get(segment.clip_id);
         if (!cfg || !cfg.enabled || !mediaRateIsPlayable(this.effectiveRigSpeed(segment.speed_milli / 1000))) continue;
+        const input = this.ir.inputs.find(item => item.input_id === segment.input_id);
+        if (!input?.has_audio) continue;
         const startUs = segment.output_start_us ?? segment.timeline_start_us;
         if (startUs > tUs && startUs <= tUs + warmupHorizonUs) warmups.add(segment.clip_id);
       }
@@ -2236,6 +2247,8 @@ export class PreviewSession {
     for (const segment of this.ir.segments) {
       const cfg = this.audioByClip.get(segment.clip_id);
       if (!cfg || !cfg.enabled) continue;
+      const input = this.ir.inputs.find(item => item.input_id === segment.input_id);
+      if (!input?.has_audio) continue;
       const speed = segment.speed_milli / 1000;
       if (!mediaRateIsPlayable(this.effectiveRigSpeed(speed))) continue;
       const startUs = segment.output_start_us ?? segment.timeline_start_us;
@@ -2249,8 +2262,7 @@ export class PreviewSession {
       let rig = this.audioRigs.get(segment.clip_id);
       if (!rig) { rig = makeAudioRig(this.effectiveRigSpeed(speed)); this.audioRigs.set(segment.clip_id, rig); }
       // B15 流式分派：长素材走块（不触发整段解码；loader 窗口请求）
-      if (!rig.buffer && !rig.workletBuffer && this.useStreamingFor(
-          this.ir.inputs.find(item => item.input_id === segment.input_id))) {
+      if (!rig.buffer && !rig.workletBuffer && this.useStreamingFor(input)) {
         if (this.ensureStreamingWorklet(rig, this.assetOfRig(rig))) {
           const assetId = this.assetOfRig(rig);
           if (assetId) void this.streamLoader!.requestChunk(
