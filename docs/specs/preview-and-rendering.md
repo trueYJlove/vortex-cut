@@ -109,3 +109,13 @@
    - FFmpeg `reverse` 滤镜将单段全部解码帧驻留内存（实测极易触发 OOM）；不实施高风险分块倒放实验，改为交付**内存预算护栏 + 显式错误码**，超预算倒放明确失败并提示可操作文案；合成预览对倒放维持 `PREVIEW_IR_UNSUPPORTED`（UI 回退交互预览）。
 4. **L8 解码表面池全局自适应预算（`decode-worker.worker.ts`）**：
    - `heldFrameCount()` 统一统计持有窗 + GOP 锚 + LRU 缓存；安全水位上限锁定为 `8`（跨 H.264/HEVC 素材避免表面池占满永久停摆），检测到「静默 + `dq > 0`」时 `shrinkForBackpressure()` 立刻减容让出表面并冻结上调。相关 E2E 回归（`p33-seek-play.electron.spec.ts`）跟踪状态见 [`../BACKLOG.md`](../BACKLOG.md#p194)。
+
+### 4.3 流需求隔离与 `audio-only` 零视觉解码护栏（P235-R2）
+
+- **流需求真源（`video_required` / `audio_required`）**：`RenderPlan` 与 `PreviewRenderIr`（`IR_PROJECTOR_VERSION`）对每条输入显式标记 `video_required` / `audio_required`；`asset_kind === "audio"`（包括作为音频轨源使用的视频文件）固定 `video_required = false`。
+- **`resolution="original"` 分辨率归属**：Core `_project_plan` / 规划期仅对 `video_required = true` 且可见的输入探测源分辨率，`audio-only` 的 4K 视频不参与 `resolution="original"` 画布尺寸判定。
+- **Desktop 运行时零视觉/零误解码隔离**：
+  - `PreviewSession.assemble()` 通过 `inputNeedsVideo` / `inputNeedsVisual` / `inputNeedsAudio` 仅对 `video_required` 输入创建视频纹理与解码 Rig，不对音频角色输入发起视觉帧解码或 `frame_decode` IPC；
+  - `TimelineCanvas` filmstrip sprite 预加载按可见 `asset_kind === "video"` 过滤，不对纯音频用途的视频素材请求/触发 `filmstrip` 缩略图；
+  - `usePreviewPlayback` 为视频素材的 `audio-only` 音频角色保留原始素材音频播放票据（不与带视觉 proxy 混淆路径），避免音频路径误绑定到无音轨或重编码 proxy。
+- **权威渲染（`ffmpeg.py` / `service.py`）零视觉解码**：`ffmpeg.py` 对 `asset_kind == "audio"` 且非静默占位输入加 input-side `-vn`，对静默音频角色片段（禁用/倒放/`has_audio=False`/越界 EOF）直接跳过 `-i` 改以 `anullsrc` 合成并重映射后续输入序号与黑场兜底索引；`RenderService._project_plan` 与 `run` 对无需视频与音频探测的非图片输入跳过 `_probe`（已由 `test_p235_r2_decode_cost_parity_real.py` 对 4K 视频做真实 FFmpeg `0` 视觉解码线程与 `0` decoded video frames 验证）。

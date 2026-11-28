@@ -28,7 +28,7 @@
 ## 2. 阶段 1：P235 语义正确性优先（2–3 周）
 
 - [x] **1.1 P235-R1** Replace：无音轨 video → 静音片段，未知时长按 OpenFilm 目标需求长度 fallback；覆盖时间线校验、预览与成片 EOF。（2026-11-28 已核销：补齐 `set_clip_source_window` 未知时长、`ffmpeg` `tpad`/past-EOF 补黑静音、`asset-drop` `center` 预览时长、`PreviewSession` 跳过静音视频流式 PCM 请求及统一 `SOURCE_EOF` 边界反馈，`test_p235_r1_replace_render_real.py` 与 `pnpm run ci` 全绿）
-- [ ] **1.2 P235-R2** 时长范围统一（100ms – `Number.MAX_SAFE_INTEGER` µs）、`video_required`/`audio_required`、Desktop rig 过滤、原始音频票据与 proxy 分离、FFmpeg input-side `-vn`、解码计数对拍证据。
+- [x] **1.2 P235-R2** 时长范围统一（100ms – `Number.MAX_SAFE_INTEGER` µs）、`video_required`/`audio_required`、Desktop rig 过滤、原始音频票据与 proxy 分离、FFmpeg input-side `-vn`、解码计数对拍证据。（2026-11-28 完成并按 Rule 7 归并入 `specs/preview-and-rendering.md` 与 `specs/timeline-and-editing.md`）
 - [ ] **1.3 P235-R3** 转场 active pair 共用投影 + migration 45（仅从不可变历史恢复 incoming identity，否则保留 null/dormant）。**新增迁移须同步 STATUS.md §1 `latest_migration`。**
 - [ ] **1.4 P235 剩余项**：Core revision/undo、双端手势矩阵、46 区像素验收、冷/热性能对照。
 - **R4 不在本阶段**（按 D2 挂起）。

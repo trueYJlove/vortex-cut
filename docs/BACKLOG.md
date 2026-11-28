@@ -22,11 +22,6 @@
 - **出处**：[`plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md)
 - **要点**：初始缩放、固定标题、`trusted wheel`、跨轨拖动、V3-B 延长与 `Place→Insert→Place` 预览已对齐；区域像素验收 46 区尚未全部达标（4 片段 perimeter 97.48%–98.93%、文字轮廓 33/39），仍待补齐完整双端手势矩阵、`Replace`/未知时长、Core revision/undo、转场/`page` 与冷热性能对照。
 
-### P235-R2 · Replace 时长保留与 audio-only 导出解码成本 {#p235-r2}
-- **类型 / 状态**：风险对策｜🟡 **设计经独立复审通过，实现与证据未闭环**
-- **出处**：[`plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2–§3
-- **要点**：移除原 30s image 上限、统一 100ms 到 `Number.MAX_SAFE_INTEGER` 微秒；视频作为音频使用时不得进入 `resolution="original"` 视觉源分辨率计算，也不得产生视觉 decoded frame；须落地 `video_required`/`audio_required`、Desktop rig 过滤、原始音频票据与 proxy 分离、FFmpeg input-side `-vn` 及解码计数对拍证据。
-
 ### P235-R3 · OpenFilm 转场来源事实与最终布局投影 {#p235-r3}
 - **类型 / 状态**：风险对策｜🟡 **架构已冻结，实现及投影测试未闭环**
 - **出处**：[`plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2

@@ -78,7 +78,6 @@
 | P237 | 0.1.0 发布门与后续路线图 | 工作包 | ⏳ 2026-11-28 已立项，按阶段逐步执行 | [`P237 计划`](plans/P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md) / [`BACKLOG#p237`](BACKLOG.md#p237) |
 | P236 | 时间线数据解耦与 Agent 工作区 | 工作包 | ⏳ 2026-11-24 已立项，待规划门与切片拆解 | [`P236 方案`](plans/P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md) / [`BACKLOG#p236`](BACKLOG.md#p236) |
 | P235 | OpenFilm 时间线完整对齐 | 工作包 | 🟡 持续实现与验收中（固定参照 `b125a3d9`） | [`P235 计划`](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) / [`BACKLOG#p235`](BACKLOG.md#p235) |
-| P235-R2 | >30s still 与 audio-only 解码成本 | 风险对策 | 🟡 复审通过，实现与计数证据未闭环 | [`BACKLOG#p235-r2`](BACKLOG.md#p235-r2) |
 | P235-R3 | 转场来源事实与最终布局投影 | 风险对策 | 🟡 架构已冻结，实现及测试未闭环 | [`BACKLOG#p235-r3`](BACKLOG.md#p235-r3) |
 | P235-R4 | HTML `page` 时间线功能与隔离渲染 | 风险对策 | ⏸ 2026-11-28 用户裁决挂起：保留架构与 Schema 预留，移出 P235 验收（P237 D2） | [`BACKLOG#p235-r4`](BACKLOG.md#p235-r4) |
 | P227 | WebGPU 合成器与假硬解提示 | 工作包 | ⏳ 代码已合入（`VITE_AIVS_GPU=1` 门控），待真机矩阵核销 | [`BACKLOG#p227`](BACKLOG.md#p227) |

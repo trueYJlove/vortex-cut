@@ -165,7 +165,8 @@ A1  音频轨（audio）                   ┘
 
 ---
 
-## 6. 媒体替换无音轨与未知时长边界（P235-R1）
+## 6. 媒体替换、统一时长上下界与未知边界（P235-R1 / R2）
 
-- **无音轨视频替换音频目标（`replace_clip_source`）**：音频轨接收 `audio` 或任意 `video` 素材（不要求存在源音轨）；无音轨视频仍保留音频 Clip 语义（`asset_kind="audio"`、`audio.enabled=true`，允许 `set_audio` 调节增益/淡变与 `trim_clip` / `set_speed` / `undo`），`RenderPlanCompiler` 与终态校验器放行，`FFmpeg` 以 `anullsrc` 产出等长静音；Desktop `TimelineCanvas` 对 `has_audio === false` 跳过波形请求并显示空带，`PreviewSession` 跳过音频 Rig 创建及 PCM 分块流式请求。
-- **未知有限时长与真实提前 EOF**：源 `media_info.duration_us` 缺失或 `0` 时，`replace_clip_source`、`trim_clip`、`set_clip_source_window` 与终态文档校验均以 `[0, round_half_up(target_duration × speed)]` 暂定源区间（受 `100ms` 下限与 `MAX_IMAGE_US` 上限约束）；Desktop 拖入替换预览（`resolveTimelineAssetDropIntent` `zone="center"`）将虚线框对齐目标起点并使用目标/截短时长。权威渲染/导出（`ffmpeg.py`）对未知或短于源窗口的视频以 `tpad` 补黑、起点已越过真实 EOF 时走全黑/静音占位，保证成片满足 `validate_rendered_media`（`±83ms`）；实时预览（`PreviewSession`）在 `±1` 邻帧兜底后仍缺帧时抛出统一 `SOURCE_EOF:` 边界反馈而不误降级解码后端。
+- **统一微秒时长边界（`100ms` – `Number.MAX_SAFE_INTEGER` µs）**：Core、`packages/contracts`（`isTimelineClip`、`insert_asset_clip`、`trim_clip`、`set_clip_source_window`、`set_image_duration`）与 Desktop `PropertyPanels.tsx` 统一采用 `100ms`（`100_000` µs）下限与 `Number.MAX_SAFE_INTEGER`（`9_007_199_254_740_991` µs）整数安全上限；移除图片与 Clip 原 `30s` 上限限制（注：`shot_requirement` 分镜拼装专用契约仍保留其独立 30s 业务约束）。
+- **无音轨视频替换音频目标（`replace_clip_source`）**：音频轨接收 `audio` 或任意 `video` 素材（不要求存在源音轨）；无音轨视频仍保留音频 Clip 语义（`asset_kind="audio"`、`audio.enabled=true`，允许 `set_audio` 调节增益/淡变与 `trim_clip` / `set_speed` / `undo`），`RenderPlanCompiler` 与终态校验器放行，`FFmpeg` 直接跳过无效 `-i` 并以 `anullsrc` 产出等长静音；Desktop `TimelineCanvas` 对 `has_audio === false` 跳过波形请求并显示空带，`PreviewSession` 跳过音频 Rig 创建及 PCM 分块流式请求（详见 [`preview-and-rendering.md`](preview-and-rendering.md#43-流需求隔离与-audio-only-零视觉解码护栏p235-r2)）。
+- **未知有限时长与真实提前 EOF**：源 `media_info.duration_us` 缺失或 `0` 时，`replace_clip_source`、`trim_clip`、`set_clip_source_window` 与终态文档校验均以 `[0, round_half_up(target_duration × speed)]` 暂定源区间（受 `100ms` 下限与统一安全整数上限约束）；Desktop 拖入替换预览（`resolveTimelineAssetDropIntent` `zone="center"`）将虚线框对齐目标起点并使用目标/截短时长。权威渲染/导出（`ffmpeg.py`）对未知或短于源窗口的视频以 `tpad` 补黑、起点已越过真实 EOF 时走全黑/静音占位，保证成片满足 `validate_rendered_media`（`±83ms`）；实时预览（`PreviewSession`）在 `±1` 邻帧兜底后仍缺帧时抛出统一 `SOURCE_EOF:` 边界反馈而不误降级解码后端。
