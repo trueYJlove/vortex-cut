@@ -62,6 +62,7 @@
 - 表面色：`--d-surface: #171b1e`、`--d-raise: #1d2326`、`--d-input: #22292c`、`--d-input-hover: #293235`、`--d-footer: #15191c`。
 - 文字与边线：`--d-text: #edf1ef`、`--d-text-2: #b5bfbc`、`--d-muted: #85918e`、`--d-faint: #64716e`、`--d-line: rgba(255,255,255,.075)`、`--d-edge: rgba(255,255,255,.12)`。
 - 强调与状态：`--accent: #35d6ae`（`--accent-hover: #59e1bf`、`--accent-ink: #07251e`、`--accent-dim: rgba(53,214,174,.11)`）、`--danger: #e35d62`、`--warning: #d8b06a`。
+- 危险语义细分令牌（深/浅双主题定义，禁止在 `.modal` 内硬编码多套红色）：`--dlg-danger-text`（`#f0a1a5`）、`--dlg-danger-text-soft`（`#edb9bb`）、`--dlg-danger-strong`（`#e88b8f`）、`--dlg-danger-muted`（`#f0b9b2`）、`--dlg-danger-warm`（`#f2b8b5`）、`--dlg-danger-calm`（`#d9b4b4`）与 `--dlg-danger-hover` / `--dlg-danger-ink` / `--dlg-danger-deep`。
 - 旧 `--vc-*` 令牌与 `--dlg-primary` 合并决策跟踪于 [`../BACKLOG.md`](../BACKLOG.md#p220)。
 
 ### 2.3 字体与控件档位（由 `spec-tier-closure.test.ts` 自动化锁定）
@@ -100,3 +101,4 @@
   - **D 三步确认族（`prototype-egress-confirm-family.html`）**：外传确认五段固定顺序（① 发什么 `.egress` 限高 180px → ② 发给谁 → ③ 花多少 → ④ 凭什么可信 → ⑤ 勾选框紧贴预览 + 底栏 danger 主按钮）。
   - **E 双栏工作台族**：页签 + 左参数 + 右预览（复用剪辑手法稿）。
 - **验证方法**：除单点数值断言外，关键族需配套元素对齐关系断言与改前改后逐元素计算样式校验。
+- **登记清单与 CSS 护栏**：全仓弹窗权威清单以 `dialog-graphite-style.test.ts` 的 `TIER_440`（4）/ `TIER_640`（19）/ `TIER_860`（5）共 28 个已登记类为准（含共用确认类 `compact-dialog` 与自实现结构 `add-transition-card`），禁止仅靠组件类名枚举；弹窗名义宽度保持单一来源（`dialog-width-single-source.test.ts`）；弹窗专属样式使用同元素选择器 `.modal.<class>` 而非后代选择器；列表/表格型弹窗状态徽章定宽 `62px` 居中（表格状态列 `th` 与 `td` 同居中），数字列右对齐 + `tabular-nums`，状态不依赖单色通道。

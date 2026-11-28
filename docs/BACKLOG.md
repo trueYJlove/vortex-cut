@@ -156,10 +156,6 @@
 
 ## 4. 桌面 UI、E2E 与手工验收欠账
 
-### P217 · 弹窗视觉系统重构（Graphite Precision）收尾核销 {#p217}
-- **类型 / 状态**：工作包｜🟡 **已登记 28 个弹窗 100% 处理完毕（24 个改动 + 4 个审计健康），待最终整体核销确认**
-- **出处**：[`specs/desktop-ui.md`](specs/desktop-ui.md) §2 / `evidence/2026-11-09-dialog-family-c/`
-
 ### P220 · 旧 `--vc-*` 令牌与 Graphite `--dlg-primary` 并存技术债 {#p220}
 - **类型 / 状态**：技术债｜⏳ **已裁决（P237 D3），待实施**
 - **出处**：`apps/desktop/src/styles.css`（`--vc-accent: #25d3ac` 约 29 处引用 vs `--dlg-primary: #35d6ae`）

@@ -103,7 +103,6 @@
 | P81 / P84 | W2.1 时钟漂移与真实多机位素材 | 风险对策 | 🟡 / ⏳ 远距拒绝已落地，缺真实多机位样片取证 | [`BACKLOG#p81`](BACKLOG.md#p81) |
 | P89/ADR0009 | W2.2 说话人语料限制与 W2.3 冻结 | 冻结项 | ❄️ W2.2 停在 D3，W2.3 冻结（解冻条件 U1–U3） | [`ADR-0009`](adr/0009-w22-diarization-closeout.md) / [`BACKLOG#p132`](BACKLOG.md#p132) |
 | P132 | W2.3 消费 turn 前须校验 `quality_status` | 验收项 | ⏳ 随未来 W2.3 立项门一并落地与测试 | [`BACKLOG#p132`](BACKLOG.md#p132) |
-| P217 | Graphite Precision 弹窗重构收尾 | 工作包 | 🟡 28 个弹窗已处理完毕，待最终整体核销 | [`BACKLOG#p217`](BACKLOG.md#p217) |
 | P220 | 旧 `--vc-*` 与 Graphite 令牌并存 | 技术债 | ⏳ 已裁决（P237 D3）：Graphite `--dlg-primary` 单源，先别名后逐步替换 | [`BACKLOG#p220`](BACKLOG.md#p220) |
 | P192/P194 | E2E 选择器与剩余缺陷收口 | 工作包 | 🟡 主链已修，余 `stage4d` 网关/凭据与 `p33-seek-play` | [`BACKLOG#p194`](BACKLOG.md#p194) |
 | Wave1-L3 | Wave 1 剪辑手法真机听感签字 | 人工验收 | ⏳ 自动化已覆盖机器可判项，待人工听感确认 | [`BACKLOG#wave1-l3`](BACKLOG.md#wave1-l3) |
