@@ -533,9 +533,14 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     # 旧实现把全部轨按 timeline_start_us 排成一条链，同时段跨轨段会被依次
     # 播放（1s + 1s 重叠 = 2s 输出），既拉长时长又错位画面。
     # 无 track_index 的旧夹具（单轨）原样保留，逐字节兼容既有测试。
-    if any(int(segment.get("track_index", 0)) != 0 for _index, segment in all_visual):
+    has_track_index = any(int(segment.get("track_index", 0)) != 0 for _index, segment in all_visual)
+    distinct_track_ids = {str(segment.get("track_id", "V1")) for _index, segment in all_visual}
+    if has_track_index:
         bottom_index = max(int(segment.get("track_index", 0)) for _index, segment in all_visual)
         visual = [item for item in all_visual if int(item[1].get("track_index", 0)) == bottom_index]
+    elif len(distinct_track_ids) > 1:
+        bottom_track_id = "V1" if "V1" in distinct_track_ids else sorted(distinct_track_ids)[0]
+        visual = [item for item in all_visual if str(item[1].get("track_id", "V1")) == bottom_track_id]
     else:
         visual = list(all_visual)
     visual.sort(key=lambda item: int(item[1]["timeline_start_us"]))
@@ -550,6 +555,7 @@ def project_preview_ir(plan: dict[str, Any], probes: dict[str, dict[str, Any]],
     overlays.sort(
         key=lambda segment: (
             -int(segment.get("track_index", 0)),
+            0 if (not has_track_index and str(segment.get("track_id", "V1")) == "V1") else 1,
             int(segment["timeline_start_us"]),
         )
     )

@@ -35,11 +35,12 @@ def _effective_duration_us(segments: list[dict[str, Any]], index: int) -> int:
     return total - _transition_tail_us(segments[index]) - _transition_head_us(segments, index)
 
 
-def _lerp_expression(track: dict[str, Any], scalar: bool) -> str:
+def _lerp_expression(track: dict[str, Any], scalar: bool, time_var: str = "t") -> str:
     """B3：关键帧轨道 → 段内相对秒 t 的 FFmpeg 表达式（分段线性）。
 
     帧升序唯一（core 已校验）；窗口外取边界值。position 展开 x/y 两段，
-    其余属性展开标量 v。
+    其余属性展开标量 v。time_var 默认 "t"；overlay 滤镜时间为全局 t，
+    传入 "(t-start_s)" 可转换为段内相对时间。
     """
     frames = track["frames"]
 
@@ -54,11 +55,11 @@ def _lerp_expression(track: dict[str, Any], scalar: bool) -> str:
                 v0 = frames[low][pick]
                 v1 = frames[high][pick]
                 span = t1 - frames[low]["t_us"] / 1_000_000
-                lerp = f"({v0:.6f}+((t-{frames[low]['t_us'] / 1_000_000:.6f})*{v1 - v0:.6f}/{span:.6f}))"
-                return f"if(lt(t,{t1:.6f}),{lerp},{v1:.6f})"
+                lerp = f"({v0:.6f}+(({time_var}-{frames[low]['t_us'] / 1_000_000:.6f})*{v1 - v0:.6f}/{span:.6f}))"
+                return f"if(lt({time_var},{t1:.6f}),{lerp},{v1:.6f})"
             mid = (low + high) // 2
             # 二分分段：左半管 [low, mid)，右半递归；不影响线性语义（嵌套 if 按 t 分派）。
-            return f"if(lt(t,{frames[mid]['t_us'] / 1_000_000:.6f}),{build(low, mid)},{build(mid, high)})"
+            return f"if(lt({time_var},{frames[mid]['t_us'] / 1_000_000:.6f}),{build(low, mid)},{build(mid, high)})"
 
         return build(0, len(frames) - 1)
 
@@ -67,6 +68,24 @@ def _lerp_expression(track: dict[str, Any], scalar: bool) -> str:
     x_expr = channel("x")
     y_expr = channel("y")
     return x_expr, y_expr
+
+
+def _base_segment_uses_overlay(
+    segment: dict[str, Any],
+    probe: dict[str, Any] | None,
+    multi_track: bool,
+    in_transition: bool,
+) -> bool:
+    """判断基底轨片段是否改为在 _pip_overlay_chain 单绘（避免与 [vcat] 双绘）。"""
+    if in_transition:
+        return False
+    if (isinstance(segment.get("mask"), dict) and segment["mask"]) or (
+        isinstance(segment.get("keying"), dict) and segment["keying"]
+    ):
+        return True
+    if isinstance(segment.get("transform"), dict) and segment["transform"]:
+        return multi_track or bool((probe or {}).get("video_streams"))
+    return False
 
 
 def _keyframe_animation_filters(
@@ -200,7 +219,7 @@ def build_timeline_args(
         (int(segment["timeline_end_us"]) for segment in segments),
         default=0,
     )
-    visual_items = [
+    all_visual_items = [
         (index, segment)
         for index, segment in enumerate(segments)
         if (
@@ -208,13 +227,24 @@ def build_timeline_args(
             and not segment.get("track_hidden", False)
         )
     ]
+    visual_total_us = max(
+        (int(segment["timeline_end_us"]) for _index, segment in all_visual_items),
+        default=0,
+    )
     # P231 修复：时间轴基底只走最下层视觉轨的同轨时间链；其它轨经下方
-    # overlay 盒链按真实时间窗叠加。旧实现把跨轨同时段一起串进 concat，
-    # 输出时长会翻倍且与 IR 合成帧不一致（A2）。无 track_index 的旧夹具
-    # 保持单链逐字节兼容。
-    if any(int(segment.get("track_index", 0)) != 0 for _index, segment in visual_items):
-        bottom_index = max(int(segment.get("track_index", 0)) for _index, segment in visual_items)
-        visual_items = [item for item in visual_items if int(item[1].get("track_index", 0)) == bottom_index]
+    # overlay 盒链按真实时间窗叠加。缺 track_index 的多轨计划回退 V1
+    # （若无 V1 取排序首轨），单轨旧夹具保持逐字节兼容。
+    has_track_index = any(int(segment.get("track_index", 0)) != 0 for _index, segment in all_visual_items)
+    distinct_track_ids = {str(segment.get("track_id", "V1")) for _index, segment in all_visual_items}
+    multi_track = has_track_index or len(distinct_track_ids) > 1
+    if has_track_index:
+        bottom_index = max(int(segment.get("track_index", 0)) for _index, segment in all_visual_items)
+        visual_items = [item for item in all_visual_items if int(item[1].get("track_index", 0)) == bottom_index]
+    elif len(distinct_track_ids) > 1:
+        bottom_track_id = "V1" if "V1" in distinct_track_ids else sorted(distinct_track_ids)[0]
+        visual_items = [item for item in all_visual_items if str(item[1].get("track_id", "V1")) == bottom_track_id]
+    else:
+        visual_items = list(all_visual_items)
     visual_items.sort(key=lambda item: int(item[1]["timeline_start_us"]))
 
     # 图项序列：黑底填充（kind=black）与视觉段（kind=segment）交错；段的
@@ -247,9 +277,21 @@ def build_timeline_args(
         # （音频保持各段静音占位）。
         graph_items.append({"kind": "black", "duration_us": timeline_total_us})
 
+    base_overlay_indices: set[int] = set()
+    for pos, gi in enumerate(graph_items):
+        if gi["kind"] != "segment":
+            continue
+        in_trans = isinstance(gi.get("transition_in"), dict) or (
+            pos > 0 and isinstance(graph_items[pos - 1].get("transition_in"), dict)
+        )
+        idx = gi["input_index"]
+        if _base_segment_uses_overlay(gi["segment"], segment_probes[idx], multi_track, in_trans):
+            base_overlay_indices.add(idx)
+
     # B3：position/opacity 动画需要一个黑底 lavfi 输入（blend/overlay 用）。
     needs_black_input = any(
         item["kind"] == "segment"
+        and item["input_index"] not in base_overlay_indices
         and isinstance(item["segment"].get("keyframes"), dict)
         and ({"position", "opacity"} & set(item["segment"]["keyframes"]))
         for item in graph_items
@@ -452,13 +494,19 @@ def build_timeline_args(
             graph_items[position - 1].get("transition_in"), dict
         )
         if not is_transition_right:
-            filters.extend(
-                visual_chain(
-                    segment, item["input_index"], f"v{position}",
-                    black_input_index=black_input_index,
-                    seek_shift_us=seek_shift_us,
+            if item["input_index"] in base_overlay_indices:
+                filters.append(
+                    f"color=c=black:s={width}x{height}:r={fps}:d={duration},"
+                    f"setsar=1,fps={fps},format=yuv420p[v{position}]"
                 )
-            )
+            else:
+                filters.extend(
+                    visual_chain(
+                        segment, item["input_index"], f"v{position}",
+                        black_input_index=black_input_index,
+                        seek_shift_us=seek_shift_us,
+                    )
+                )
         has_audio = bool(probe.get("audio_streams"))
         if (
             segment["asset_kind"] == "video"
@@ -512,8 +560,14 @@ def build_timeline_args(
         segment = item["segment"]
         return int(segment["timeline_end_us"]) - int(segment["timeline_start_us"])
 
+    base_borrow_us = sum(
+        int(item["transition_in"]["duration_us"])
+        for item in graph_items
+        if item["kind"] == "segment" and isinstance(item.get("transition_in"), dict)
+    )
     if not has_active_transitions:
         filters.append(f"{''.join(concat_inputs)}concat=n={len(graph_items)}:v=1:a=1[vcat][acat]")
+        base_video_us = sum(_item_span_us(item) for item in graph_items)
     else:
         # B2 借用式重叠（实测 FFmpeg xfade 语义：输出在 offset+duration 处结束，
         # 右输入对齐到 offset 且超出 duration 的部分被丢弃）。因此：
@@ -602,6 +656,44 @@ def build_timeline_args(
                 audio_label_prev = f"ax{step}"
                 accumulated_us += _item_span_us(item)
         filters.append(f"[{video_label_prev}]null[vcat];[{audio_label_prev}]anull[acat]")
+        base_video_us = accumulated_us
+
+    target_visual_us = max(base_video_us, visual_total_us - base_borrow_us)
+    # P231 统一盒模型：所有可见视觉段按**轨道序**（下层先画、上层后画）
+    # 逐层叠加到时间序基底上——上层轨道盖下层（剪映/OpenFilm 同语义）。
+    overlay_segments = [
+        (index, segment)
+        for index, segment in enumerate(segments)
+        if (
+            segment["asset_kind"] != "audio"
+            and not segment.get("track_hidden", False)
+        )
+    ]
+    # P231 修复：与 IR layers 同一 z 序——track_index 降序（下层先画、
+    # 上层后画），缺 track_index 时 V1 排最下层，同轨按时间排序。
+    overlay_segments.sort(
+        key=lambda item: (
+            -int(item[1].get("track_index", 0)),
+            0 if (not has_track_index and str(item[1].get("track_id", "V1")) == "V1") else 1,
+            int(item[1]["timeline_start_us"]),
+        )
+    )
+    base_index_set = {index for index, _segment in visual_items}
+    if multi_track:
+        overlay_segments = [
+            (index, segment) for index, segment in overlay_segments
+            if index not in base_index_set or index in base_overlay_indices
+        ]
+    else:
+        overlay_segments = [
+            (index, segment) for index, segment in overlay_segments
+            if not (
+                index in base_index_set
+                and index not in base_overlay_indices
+                and isinstance(segment.get("transform"), dict)
+            )
+        ]
+    needs_tail_extend = bool(overlay_segments) and target_visual_us > base_video_us
 
     # A1 音频混音（M3-3 第一段）：纯音频段（asset_kind=audio）此前被整图
     # 跳过——预览侧 syncAudio 对 A1 出声而导出无声（预览≠导出）。各 A1 段
@@ -662,48 +754,23 @@ def build_timeline_args(
             f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:normalize=0:duration=longest[mixed]"
         )
         filters.append(f"[mixed]atrim=duration={_seconds(timeline_total_us)},asetpts=PTS-STARTPTS[aout]")
+    elif needs_tail_extend:
+        filters.append(
+            f"[acat]apad,atrim=duration={_seconds(target_visual_us)},asetpts=PTS-STARTPTS[aout]"
+        )
     else:
         filters.append("[acat]anull[aout]")
     video_label = "vcat"
-    # P231 统一盒模型：所有可见视觉段按**轨道序**（下层先画、上层后画）
-    # 逐层叠加到时间序基底上——上层轨道盖下层（剪映/OpenFilm 同语义）。
-    # 时间序基底（concat/xfade）只由最下层视觉轨构成；其余轨以及带
-    # transform/mask/keying 的基底段走 [MAINPIP] 链式 overlay。
-    #
-    # 例外：首段（时间序第一个视觉段）若无 transform/mask/keying，直通
-    # concat 路径（旧图逐字节不变，回归锁）；否则首段也进 overlay 链
-    # （其 concat [vN] 悬空由 visual_chain 仍生成保证标签存在）。
-    overlay_segments = [
-        (index, segment)
-        for index, segment in enumerate(segments)
-        if (
-            segment["asset_kind"] != "audio"
-            and not segment.get("track_hidden", False)
-        )
-    ]
-    # P231 修复：与 IR layers 同一 z 序——track_index 降序（下层先画、
-    # 上层后画），同轨按时间排序；overlay 链后叠加的段覆盖先叠加的段。
-    overlay_segments.sort(
-        key=lambda item: (
-            -int(item[1].get("track_index", 0)),
-            int(item[1]["timeline_start_us"]),
-        )
-    )
-    # P231 修复：基底轨里「无 transform/mask/keying、且不是转场左右段」的
-    # 段已由 concat/xfade 直画，不再进 overlay 链——旧实现会对同一段画两遍，
-    # 且两条链的盒坐标/alpha 口径不同（A2 破）。
-    multi_track = any(int(segment.get("track_index", 0)) != 0 for _index, segment in visual_items)
-    base_indices = {index for index, _segment in visual_items} if multi_track else set()
-    overlay_segments = [
-        (index, segment) for index, segment in overlay_segments
-        if index not in base_indices
-        or isinstance(segment.get("transform"), dict)
-        or isinstance(segment.get("mask"), dict)
-        or isinstance(segment.get("keying"), dict)
-    ]
     if overlay_segments:
         main_label = "MAINPIP"
-        filters.append(f"[vcat]null[{main_label}]")
+        if needs_tail_extend:
+            filters.append(
+                f"color=c=black:s={width}x{height}:r={fps}:d={_seconds(target_visual_us)},"
+                f"setsar=1,format=yuv420p[tailbg]"
+            )
+            filters.append(f"[tailbg][vcat]overlay=eof_action=pass:format=auto[{main_label}]")
+        else:
+            filters.append(f"[vcat]null[{main_label}]")
         first_visual_clip = graph_items[0]["segment"]["clip_id"] if graph_items and graph_items[0]["kind"] == "segment" else None
         for index, segment in overlay_segments:
             # 首段（时间序首段）无 transform/mask/keying → 已在 concat 基底
@@ -977,9 +1044,15 @@ def _pip_overlay_chain(
         rotate_val = float(transform.get("rotate", 0.0))
     except (TypeError, ValueError):
         rotate_val = 0.0
+    try:
+        opacity = float(transform.get("opacity", 1.0))
+    except (TypeError, ValueError):
+        opacity = 1.0
     cx = min(max(cx, 0.0), 1.0)
     cy = min(max(cy, 0.0), 1.0)
     scale_val = min(max(scale_val, 0.05), 5.0)
+    opacity = min(max(opacity, 0.0), 1.0)
+    keyframes = segment.get("keyframes") if isinstance(segment.get("keyframes"), dict) else None
     # 内容盒尺寸：fit / blurred_background 按素材宽高比等比适配进画布（SAR 归一）；
     # crop_fill 与未知尺寸回退满画布。
     streams = (probe or {}).get("video_streams") or []
@@ -1028,7 +1101,13 @@ def _pip_overlay_chain(
         )
     label = f"pip{input_index}"
     head = f"{source},{_square_pixel_filter()},{visual},scale={pip_w}:{pip_h}:force_divisible_by=2"
-    if rotate_val != 0.0:
+    has_rotate_kf = bool(keyframes and "rotate" in keyframes)
+    has_rotate = rotate_val != 0.0 or has_rotate_kf
+    if has_rotate_kf:
+        rot_expr = _lerp_expression(keyframes["rotate"], True).replace(",", "\\,")
+        angle_expr = f"({rotate_val:.4f}+({rot_expr}))*PI/180" if rotate_val != 0.0 else f"({rot_expr})*PI/180"
+        head += f",format=rgba,rotate='{angle_expr}':fillcolor=black@0:ow=iw:oh=ih"
+    elif rotate_val != 0.0:
         # 浮层旋转的角落必须透明（露出下层），走 rgba + 黑透明填充。
         # 度数语义（contracts -180..180°）→ rotate 滤镜弧度参数，与关键帧 rotate 路径一致。
         head += ",format=rgba,rotate='{}*PI/180':fillcolor=black@0:ow=iw:oh=ih".format(f"{rotate_val:.4f}")
@@ -1054,6 +1133,8 @@ def _pip_overlay_chain(
             parts.append(f"({key_expr})")
         joined = "*".join(parts)
         a_expr = joined if len(parts) == 1 else f"{joined}/255"
+        if has_rotate:
+            a_expr = f"({a_expr})*alpha(X,Y)/255"
         alpha_clause: list[str] = [
             f"[{label}]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{a_expr}'[{label}vis]"
         ]
@@ -1061,6 +1142,20 @@ def _pip_overlay_chain(
     else:
         alpha_clause = []
         align_label = label
+    if opacity < 1.0:
+        op_label = f"{label}op"
+        alpha_clause.append(
+            f"[{align_label}]format=rgba,colorchannelmixer=aa={opacity:.6f}[{op_label}]"
+        )
+        align_label = op_label
+    if keyframes and "opacity" in keyframes:
+        d_us = int(keyframes["opacity"]["frames"][-1]["t_us"])
+        if d_us > 0:
+            kop_label = f"{label}kop"
+            alpha_clause.append(
+                f"[{align_label}]format=rgba,fade=alpha=1:st=0.000000:d={_seconds(d_us)}[{kop_label}]"
+            )
+            align_label = kop_label
     picture_fade_in = max(int(segment.get("picture_fade_in_us") or 0), 0)
     picture_fade_out = max(int(segment.get("picture_fade_out_us") or 0), 0)
     if picture_fade_in or picture_fade_out:
@@ -1085,8 +1180,18 @@ def _pip_overlay_chain(
     # transform.x/y 为「中心点归一化位置」（0..1，与 contracts 注释及交互预览
     # translate(-50%,-50%) 语义一致）：overlay 左上角 = 中心点像素 − PIP 尺寸一半。
     # 负值表示 PIP 部分出画（overlay 自动裁剪），与预览画布 overflow 裁剪行为对齐。
-    x_expr = f"{cx * width - pip_w / 2:.1f}"
-    y_expr = f"{cy * height - pip_h / 2:.1f}"
+    base_x = cx * width - pip_w / 2
+    base_y = cy * height - pip_h / 2
+    if keyframes and "position" in keyframes:
+        local_t = f"(t-{enable_start_us / 1_000_000:.6f})"
+        kx_expr, ky_expr = _lerp_expression(keyframes["position"], False, time_var=local_t)
+        kx_esc = kx_expr.replace(",", "\\,")
+        ky_esc = ky_expr.replace(",", "\\,")
+        x_expr = f"{base_x:.1f}+({kx_esc})*({width / 2 * scale_val:.6f})"
+        y_expr = f"{base_y:.1f}+({ky_esc})*({height / 2 * scale_val:.6f})"
+    else:
+        x_expr = f"{base_x:.1f}"
+        y_expr = f"{base_y:.1f}"
     overlay = (
         f"[{main_label}][{label}a]overlay=x='{x_expr}':y='{y_expr}':"
         f"enable='between(t,{_seconds(enable_start_us)},{_seconds(enable_end_us)})':"

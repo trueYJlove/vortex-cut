@@ -1277,3 +1277,98 @@ def test_active_audio_crossfade_uses_pair_facts_and_fade_window() -> None:
     assert plan["active_transitions"][0]["kind"] == "crossfade"
     assert "afade=t=out:st=1.000000:d=1.000000" in graph
     assert "afade=t=in:st=0:d=1.000000" in graph
+
+
+def test_p231_multi_track_without_track_index_uses_v1_base_and_tail_black() -> None:
+    """P231 修复 1+2：缺 track_index 的多轨计划按 V1 基底，且 V2 超长时以黑底承接不截断。"""
+    plan = {
+        "segments": [
+            {
+                "clip_id": "v1", "input_id": "I0", "track_id": "V1", "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 1_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            },
+            {
+                "clip_id": "v2", "input_id": "I1", "track_id": "V2", "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_500_000,
+                "timeline_start_us": 2_000_000, "timeline_end_us": 3_500_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 320, "height": 180, "fps_num": 30, "fps_den": 1},
+    }
+    probes = [{"video_streams": [{"width": 320, "height": 180, "sample_aspect_ratio": "1:1"}], "audio_streams": []}] * 2
+    args = build_timeline_args(plan, [Path("a.mp4"), Path("b.mp4")], probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "concat=n=1:v=1:a=1" in graph
+    assert "concat=n=2:v=1:a=1" not in graph
+    assert "color=c=black:s=320x180:r=30:d=3.500000" in graph
+    assert "[tailbg][vcat]overlay=eof_action=pass:format=auto[MAINPIP]" in graph
+    assert "[acat]apad,atrim=duration=3.500000,asetpts=PTS-STARTPTS[aout]" in graph
+
+
+def test_p231_base_segment_with_mask_or_transform_renders_once_via_overlay() -> None:
+    """P231 修复 3：基底轨带 mask 或有 video_streams 的 transform 时基底槽出黑帧，仅在 overlay 单绘一次。"""
+    plan = {
+        "segments": [
+            {
+                "clip_id": "v1", "input_id": "I0", "track_id": "V1", "track_index": 1, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+                "transform": {"x": 0.35, "y": 0.5, "scale": 0.6, "opacity": 0.7},
+                "mask": {"kind": "rect", "x": 0.5, "y": 0.5, "width": 0.6, "height": 0.6, "feather": 0.0},
+            },
+            {
+                "clip_id": "v2", "input_id": "I1", "track_id": "V2", "track_index": 0, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 320, "height": 180, "fps_num": 30, "fps_den": 1},
+    }
+    probes = [{"video_streams": [{"width": 320, "height": 180, "sample_aspect_ratio": "1:1"}], "audio_streams": []}] * 2
+    args = build_timeline_args(plan, [Path("a.mp4"), Path("b.mp4")], probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert graph.count("[0:v:0]") == 1
+    assert "color=c=black:s=320x180:r=30:d=2.000000,setsar=1,fps=30,format=yuv420p[v0]" in graph
+    assert "[pip0vis]format=rgba,colorchannelmixer=aa=0.700000[pip0op]" in graph
+
+
+def test_p231_pip_overlay_chain_supports_opacity_and_keyframes() -> None:
+    """P231 修复 4：_pip_overlay_chain 消费静态 opacity 与 position/rotate/opacity 关键帧。"""
+    plan = {
+        "segments": [
+            {
+                "clip_id": "v1", "input_id": "I0", "track_id": "V1", "track_index": 1, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 2_000_000,
+                "timeline_start_us": 0, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+            },
+            {
+                "clip_id": "v2", "input_id": "I1", "track_id": "V2", "track_index": 0, "asset_kind": "video",
+                "source_start_us": 0, "source_end_us": 1_500_000,
+                "timeline_start_us": 500_000, "timeline_end_us": 2_000_000,
+                "layout": "fit", "audio_enabled": False, "gain_db": 0.0,
+                "transform": {"x": 0.5, "y": 0.5, "scale": 0.5, "opacity": 0.6},
+                "keyframes": {
+                    "position": {"frames": [{"t_us": 0, "x": -0.2, "y": 0.0}, {"t_us": 1_500_000, "x": 0.2, "y": 0.0}]},
+                    "rotate": {"frames": [{"t_us": 0, "v": 0.0}, {"t_us": 1_500_000, "v": 15.0}]},
+                    "opacity": {"frames": [{"t_us": 0, "v": 0.0}, {"t_us": 1_000_000, "v": 1.0}]},
+                },
+            },
+        ],
+        "captions": {"items": []},
+        "output": {"width": 320, "height": 180, "fps_num": 30, "fps_den": 1},
+    }
+    probes = [{"video_streams": [{"width": 320, "height": 180, "sample_aspect_ratio": "1:1"}], "audio_streams": []}] * 2
+    args = build_timeline_args(plan, [Path("a.mp4"), Path("b.mp4")], probes, "libopenh264", "out.mp4", captions=False)
+    graph = args[args.index("-filter_complex") + 1]
+    assert "colorchannelmixer=aa=0.600000[pip1op]" in graph
+    assert "fade=alpha=1:st=0.000000:d=1.000000[pip1kop]" in graph
+    assert "*PI/180':fillcolor=black@0:ow=iw:oh=ih" in graph
+    assert "(t-0.500000)" in graph
