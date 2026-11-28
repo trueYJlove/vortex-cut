@@ -15,6 +15,7 @@ export type FetchBinaryWithUi = (path: string, init?: RequestInit) => Promise<Ar
 const rendererSensitiveKeys = new Set([
   "path", "uri", "root_dir", "database", "database_path", "admin_token", "ui_token", "token", "authorization",
   "installed_path", "install_dir", "source_file", "model_path", "model_dir", "runtime_dir", "ready_file",
+  "absolute_path", "api_key", "secret", "stderr", "traceback", "raw_exception",
 ]);
 
 /** Strip sensitive local path, token, and internal directory keys before returning Core DTOs to Renderer. */
@@ -23,7 +24,7 @@ export function rendererSafe(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (!rendererSensitiveKeys.has(key)) result[key] = rendererSafe(item);
+    if (!rendererSensitiveKeys.has(key.toLowerCase())) result[key] = rendererSafe(item);
   }
   return result;
 }

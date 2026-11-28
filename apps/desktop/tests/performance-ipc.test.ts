@@ -494,4 +494,31 @@ describe("C20 窗口化 IR v2 IPC", () => {
     fetchWithUi.mockResolvedValueOnce({ ...manifest, schema: "preview-ir-v1" });
     await expect(handlers.get("preview-ir-v2:manifest")?.({}, { project_id: "project_1" })).rejects.toThrow();
   });
+
+  it("strips mixed-case sensitive keys across nested objects and arrays in performance IPC", async () => {
+    const { rendererSafe } = await import("../electron/main/ipc/performance-ipc.js");
+    const sanitized = rendererSafe({
+      asset_id: "asset_1",
+      Authorization: "Bearer x",
+      Token: "t",
+      Path: "C:\\secret.mp4",
+      nested: {
+        Admin_Token: "a",
+        UI_Token: "u",
+        Database_Path: "C:\\app.db",
+        Absolute_Path: "/tmp/secret",
+        Root_Dir: "/tmp",
+        URI: "file:///tmp/x",
+        Stderr: "err",
+        Traceback: "tb",
+        ok: 1,
+      },
+      rows: [{ Token: "row-tok", frame_count: 10 }],
+    });
+    expect(sanitized).toEqual({
+      asset_id: "asset_1",
+      nested: { ok: 1 },
+      rows: [{ frame_count: 10 }],
+    });
+  });
 });

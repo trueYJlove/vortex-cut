@@ -36,14 +36,26 @@ type FetchWithUi = (path: string, init?: RequestInit) => Promise<unknown>;
  *   aivideo:// 票据 URL，永远接触不到 path。
  */
 
-const RENDERER_SAFE_KEYS = new Set(["path", "uri", "absolute_path", "root_dir"]);
+const RENDERER_SENSITIVE_KEYS = new Set([
+  "path",
+  "uri",
+  "absolute_path",
+  "root_dir",
+  "token",
+  "admin_token",
+  "ui_token",
+  "authorization",
+  "database_path",
+  "stderr",
+  "traceback",
+]);
 
-function rendererSafe(value: unknown): unknown {
+export function rendererSafe(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(rendererSafe);
   if (!value || typeof value !== "object") return value;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (!RENDERER_SAFE_KEYS.has(key.toLowerCase())) result[key] = rendererSafe(item);
+    if (!RENDERER_SENSITIVE_KEYS.has(key.toLowerCase())) result[key] = rendererSafe(item);
   }
   return result;
 }
