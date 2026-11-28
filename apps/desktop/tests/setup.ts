@@ -1,5 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
 import { beforeEach, vi } from "vitest";
+
+// 与 vitest.config.ts testTimeout=20000 配套：全量 177 文件并行时 jsdom 争抢 CPU，
+// Testing Library 默认 1000ms 的 findBy*/waitFor 超时易被 <App /> 首帧挂载触发。
+configure({ asyncUtilTimeout: 5000 });
 
 // jsdom does not implement real media playback. Several tests call
 // vi.restoreAllMocks() in afterEach, which would bring back jsdom's native
