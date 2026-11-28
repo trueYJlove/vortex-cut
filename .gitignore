@@ -105,7 +105,7 @@ resources/.test-model-cache/
 .uv-cache/
 
 # 脚本可确定性再生的本地对比媒体夹具
-tools/openfilm-timeline-parity/media/p235-timeline-audio.wav
+tools/openfilm-timeline-parity/media/
 
 # 证据目录下的音频波形等大型媒体文件（保留轻量 <200KB JSON 摘要）
 evidence/**/*.wav

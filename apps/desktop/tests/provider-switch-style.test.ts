@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { cssSpecificity as specificity, parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * Provider 启用开关的级联回归（2026-11-09）。
@@ -25,64 +25,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 16px 当成了轨道宽度。命中是浏览器的既有语义，不该在这里重造。
  */
 
-const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };
-
-/** 抽出所有规则，跳过 at-rule 包裹层（@media 变体不是 1440×900 基准态）。 */
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    if (char === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1;
-      let j = i + 1;
-      let body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j];
-        j += 1;
-      }
-      order += 1;
-      out.push({
-        selectors: prelude.split(",").map(part => part.replace(/\s+/g, " ").trim()).filter(Boolean),
-        body,
-        order,
-        inMedia: stack.some(item => item.startsWith("@media")),
-      });
-      i = j;
-      continue;
-    }
-    if (char === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += char;
-  }
-  return out;
-}
-
-const RULES = parseRules(css);
-
-/** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 参数计入，自身不计）。 */
-function specificity(selector: string): [number, number, number] {
-  let expanded = selector;
-  let previous = "";
-  while (previous !== expanded) {
-    previous = expanded;
-    expanded = expanded.replace(/:not\(([^)]*)\)/g, " $1 ");
-  }
-  const ids = (expanded.match(/#[\w-]+/g) ?? []).length;
-  const classes = (expanded.match(/\.[\w-]+/g) ?? []).length
-    + (expanded.match(/\[[^\]]+\]/g) ?? []).length
-    + (expanded.match(/:(?!not\()[\w-]+/g) ?? []).length;
-  const types = (expanded.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length;
-  return [ids, classes, types];
-}
+const RULES = parseCssRules(readDesktopStyles());
 
 function compare(a: [number, number, number], b: [number, number, number]): number {
   for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];

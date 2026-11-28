@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { cssSpecificity as spec, parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 弹窗宽度：声明的值必须等于实际生效的值（2026-11-09）。
@@ -26,50 +26,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 宽高都相等（如 860 / 860）的死代码不在此列——它不误导任何人。
  */
 
-const raw = readDesktopStyles();
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { sels: string[]; body: string; order: number; inMedia: boolean };
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1, j = i + 1, body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j]; j += 1;
-      }
-      order += 1;
-      out.push({
-        sels: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean),
-        body, order, inMedia: stack.length > 0,
-      });
-      i = j; continue;
-    }
-    if (ch === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += ch;
-  }
-  return out;
-}
-const RULES = parseRules(css);
-
-function spec(sel: string): [number, number, number] {
-  let e = sel, prev = "";
-  while (prev !== e) { prev = e; e = e.replace(/:not\(([^)]*)\)/g, " $1 "); }
-  return [
-    (e.match(/#[\w-]+/g) ?? []).length,
-    (e.match(/\.[\w-]+/g) ?? []).length + (e.match(/\[[^\]]+\]/g) ?? []).length + (e.match(/:(?!not\()[\w-]+/g) ?? []).length,
-    (e.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length,
-  ];
-}
+const RULES = parseCssRules(readDesktopStyles());
 const cmp = (a: number[], b: number[]) => { for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
 const widthOf = (body: string): string | null => {
   const m = /(?:^|;)\s*width\s*:\s*([^;]+)/.exec(body);
@@ -91,7 +48,7 @@ const nominal = (w: string): number | null => {
 const dialogClasses = new Set<string>();
 const MODAL_SUFFIX = /-(modal|dialog|card)$/;
 for (const r of RULES) {
-  for (const s of r.sels) {
+  for (const s of r.selectors) {
     const prefixed = /^\.modal\.([\w-]+)$/.exec(s);
     if (prefixed) { dialogClasses.add(prefixed[1]); continue; }
     const bare = /^\.([\w-]+)$/.exec(s);
@@ -106,8 +63,8 @@ describe("弹窗宽度：声明的名义宽度必须等于实际生效的", () =
       // 一个弹窗可能同时有 .X 与 .modal.X 两种写法，都要纳入候选
       const sels = [".modal." + name, "." + name];
       const candidates = RULES
-        .filter(r => !r.inMedia && sels.some(s => r.sels.includes(s)))
-        .map(r => ({ width: widthOf(r.body), spec: spec(sels.find(s => r.sels.includes(s))!), order: r.order }))
+        .filter(r => !r.inMedia && sels.some(s => r.selectors.includes(s)))
+        .map(r => ({ width: widthOf(r.body), spec: spec(sels.find(s => r.selectors.includes(s))!), order: r.order }))
         .filter((c): c is { width: string; spec: [number, number, number]; order: number } => c.width !== null);
       if (candidates.length < 2) continue;
 
@@ -133,7 +90,7 @@ describe("弹窗宽度：声明的名义宽度必须等于实际生效的", () =
     for (const name of ["transcript-viewer", "revision-compare"]) {
       const sel = ".modal." + name;
       const widths = RULES
-        .filter(r => !r.inMedia && r.sels.includes(sel))
+        .filter(r => !r.inMedia && r.selectors.includes(sel))
         .map(r => widthOf(r.body))
         .filter((w): w is string => w !== null);
       expect(widths.length, `.modal.${name} 应恰有一条 width 声明`).toBe(1);

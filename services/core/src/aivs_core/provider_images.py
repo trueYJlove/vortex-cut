@@ -34,10 +34,6 @@ def sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
 
-def sha256_text(value: str) -> str:
-    return sha256_bytes(value.encode("utf-8"))
-
-
 class ProviderImageError(RuntimeError):
     def __init__(self, code: str, message: str, may_have_processed: bool = False) -> None:
         super().__init__(message)

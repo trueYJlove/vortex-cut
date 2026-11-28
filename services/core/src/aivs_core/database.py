@@ -1010,28 +1010,34 @@ class Database:
             unknown = set(applied) - set(MIGRATIONS)
             if unknown:
                 raise MigrationError(f"未知数据库版本: {sorted(unknown)}")
+            pending: list[tuple[str, str, str]] = []
             for version, sql in MIGRATIONS.items():
                 checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
                 if version in applied:
                     if applied[version] != checksum:
                         raise MigrationError(f"迁移校验和不匹配: {version}")
                     continue
+                pending.append((version, sql, checksum))
+
+            if pending:
                 self.last_backup = self._backup()
+
+            compat_handlers = {
+                V1_VERSION: self._apply_v1_compatibility,
+                V2_VERSION: self._apply_v2_compatibility,
+                V3_VERSION: self._apply_v3_compatibility,
+                V4_VERSION: self._apply_v4_compatibility,
+                V5_VERSION: self._apply_v5_compatibility,
+            }
+            for version, sql, checksum in pending:
                 try:
                     if version in {V13_VERSION, V14_VERSION, V42_VERSION, V44_VERSION}:
                         self._apply_rebuild(db, version, sql, checksum)
                         continue
                     db.execute("BEGIN")
-                    self._apply_v1_compatibility(db)
-                    self._apply_v2_compatibility(db)
-                    self._apply_v3_compatibility(db)
-                    self._apply_v4_compatibility(db)
-                    self._apply_v5_compatibility(db)
-                    self._apply_v6_compatibility(db)
-                    self._apply_v7_compatibility(db)
-                    self._apply_v8_compatibility(db)
-                    self._apply_v9_compatibility(db)
-                    self._apply_v10_compatibility(db)
+                    compat = compat_handlers.get(version)
+                    if compat is not None:
+                        compat(db)
                     statements = _statements(sql)
                     if version == V9_VERSION:
                         statements = self._v9_statements(db, statements)
@@ -1184,28 +1190,6 @@ class Database:
                 )
 
     @staticmethod
-    def _apply_v6_compatibility(db: sqlite3.Connection) -> None:
-        # v6's SQL performs the only required additions. This helper deliberately
-        # has no data rewrite: every historical Provider must remain untested.
-        del db
-
-    @staticmethod
-    def _apply_v7_compatibility(db: sqlite3.Connection) -> None:
-        # v7 only replaces capability constraints; existing metadata is preserved.
-        del db
-
-    @staticmethod
-    def _apply_v8_compatibility(db: sqlite3.Connection) -> None:
-        # v8 is append-only: historical rows keep nullable snapshot columns.
-        del db
-
-    @staticmethod
-    def _apply_v9_compatibility(db: sqlite3.Connection) -> None:
-        # v9 has no data rewrite. Existing partial columns are handled by
-        # _v9_statements while preserving the fixed migration checksum.
-        del db
-
-    @staticmethod
     def _v9_statements(db: sqlite3.Connection, statements: list[str]) -> list[str]:
         existing = {
             table: {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -1230,12 +1214,6 @@ class Database:
                 for prefix, (table, column) in additions.items()
             )
         ]
-
-    @staticmethod
-    def _apply_v10_compatibility(db: sqlite3.Connection) -> None:
-        # v10 has no historical data rewrite. Partial ALTER additions are
-        # filtered while the frozen migration text retains a stable checksum.
-        del db
 
     @staticmethod
     def _v10_statements(db: sqlite3.Connection, statements: list[str]) -> list[str]:

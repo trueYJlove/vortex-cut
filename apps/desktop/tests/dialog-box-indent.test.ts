@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { compareSpecificity as compare, cssSpecificity as specificity, extractCssBlocks as rules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 弹窗盒式缩进回归（2026-10-06）。
@@ -15,45 +15,6 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  */
 
 const css = readDesktopStyles();
-
-/** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 内部按其参数计入）。 */
-function specificity(selector: string): [number, number, number] {
-  // 先把 :not(...) 展开为其内部内容参与计数（规范：:not() 自身不计，
-  // 但其参数的选择器计入），避免重复计数。
-  let expanded = selector;
-  let previous = "";
-  while (previous !== expanded) {
-    previous = expanded;
-    expanded = expanded.replace(/:not\(([^)]*)\)/g, " $1 ");
-  }
-  const ids = (expanded.match(/#[\w-]+/g) ?? []).length;
-  const classes = (expanded.match(/\.[\w-]+/g) ?? []).length
-    + (expanded.match(/\[[^\]]+\]/g) ?? []).length
-    + (expanded.match(/:(?!not\()[\w-]+/g) ?? []).length;
-  const types = (expanded.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length;
-  return [ids, classes, types];
-}
-
-function compare(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
-  return 0;
-}
-
-/** 抽出所有规则（选择器 → 声明块），跳过 at-rule 包裹层。
-    选择器列表常跨多行，故用「最后一个 { 之前」的全部文本作为选择器。
-    注释必须先剥离：否则紧邻规则的块注释会被并入选择器，令 startsWith 判定失效。 */
-function rules(source: string): Array<{ selector: string; body: string }> {
-  const out: Array<{ selector: string; body: string }> = [];
-  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(stripped)) !== null) {
-    const selector = match[1].trim();
-    if (selector.startsWith("@")) continue;
-    out.push({ selector, body: match[2] });
-  }
-  return out;
-}
 
 /** 规则的选择器列表（按逗号切分，容忍跨行与空白）。 */
 function selectorList(selector: string): string[] {

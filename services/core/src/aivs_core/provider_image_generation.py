@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
-import json
 import os
 import sqlite3
 import stat
@@ -13,7 +11,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
-from .ids import new_id
+from .hashing import (
+    canonical_json as _canonical_json,
+    sha256_canonical as _sha256_value,
+    sha256_text as _sha256_text,
+)
+from .ids import is_valid_id, new_id, validate_id
 from .projects import DomainError, ProjectAssetService
 from .provider_images import (
     ALLOWED_IMAGE_SIZES,
@@ -34,30 +37,11 @@ EXECUTION_MODE = "provider_image_v1"
 CAPABILITY = "image_text_to_image"
 ENDPOINT_IDENTITY = "apikey_fun_images_generations"
 OUTPUT_FORMAT = "png"
-_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 ImageGenerationTransactionHook = Callable[[sqlite3.Connection, str, str, bool], None]
 
 
-def _canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _sha256_value(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(_canonical_json(value).encode()).hexdigest()
-
-
-def _sha256_text(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode()).hexdigest()
-
-
 def _id(value: Any, field: str) -> str:
-    if (
-        not isinstance(value, str)
-        or not 1 <= len(value) <= 128
-        or any(character not in _ID_CHARS for character in value)
-    ):
-        raise DomainError("IMAGE_PROVIDER_CONFIG_INVALID", f"{field} 无效")
-    return value
+    return validate_id(value, "IMAGE_PROVIDER_CONFIG_INVALID", f"{field} 无效")
 
 
 def _prompt(value: Any) -> str:
@@ -1113,7 +1097,7 @@ class ProviderImageGenerationService:
 
     @staticmethod
     def _valid_file_id(value: str) -> bool:
-        return 1 <= len(value) <= 128 and all(character in _ID_CHARS for character in value)
+        return is_valid_id(value)
 
     @staticmethod
     def _path_is_reparse(path: Path) -> bool:

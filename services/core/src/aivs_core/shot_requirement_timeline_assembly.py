@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
+from .hashing import sha256_canonical as _sha256
 from .ids import new_id
 from .projects import DomainError
 from .timeline import LAYOUTS, TimelineService
@@ -15,16 +15,6 @@ MIN_ASSEMBLY_US = 500_000
 MAX_ASSEMBLY_US = 30_000_000
 DEFAULT_ASSEMBLY_US = 3_000_000
 PREVIEW_TTL = timedelta(minutes=15)
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-
-
-def _sha256(value: Any) -> str:
-    return f"sha256:{hashlib.sha256(_canonical(value)).hexdigest()}"
 
 
 def _document_sha256(document: dict[str, Any]) -> str:

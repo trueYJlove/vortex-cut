@@ -15,7 +15,6 @@ v40 的 `asset_frame_tags` 表已存在，测试可直接写入行来验证读�
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from .database import Database, json_loads
@@ -132,7 +131,3 @@ def validate_label(label: str) -> str:
     if len(cleaned) > 64:
         raise DomainError("VALIDATION_ERROR", "标签过长")
     return cleaned
-
-
-def dumps_labels(labels: list[str]) -> str:
-    return json.dumps(sorted({str(label) for label in labels}), ensure_ascii=False)

@@ -5,11 +5,11 @@ import hashlib
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from threading import Lock
 from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
+from .payload_store import ExpiringPayloadStore, is_expired as _expired
 from .planning import ProviderRepository, canonical_json, invocation_cost, sha256
 from .projects import DomainError
 from .providers import (
@@ -26,45 +26,9 @@ from .providers import (
 from .timeline import AI_PATCH_OPERATIONS, TimelineService, timeline_diff
 
 
-class TimelinePatchPayloadStore:
-    """Process-local payload boundary. Values must never be serialized or logged."""
-
-    def __init__(self) -> None:
-        self._values: dict[str, dict[str, Any]] = {}
-        self._lock = Lock()
-
-    def put(self, key: str, value: dict[str, Any]) -> None:
-        with self._lock:
-            self._values[key] = value
-
-    def get(self, key: str) -> dict[str, Any] | None:
-        with self._lock:
-            value = self._values.get(key)
-            if value is None:
-                return None
-            if _expired(value["expires_at"]):
-                self._values.pop(key, None)
-                return None
-            return value
-
-    def pop(self, key: str) -> dict[str, Any] | None:
-        with self._lock:
-            value = self._values.pop(key, None)
-        if value is None or _expired(value["expires_at"]):
-            return None
-        return value
-
-    def discard(self, key: str) -> None:
-        with self._lock:
-            self._values.pop(key, None)
-
-
-PendingTimelinePatchEgressStore = TimelinePatchPayloadStore
-GenerationPayloadStore = TimelinePatchPayloadStore
-
-
-def _expired(value: str) -> bool:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")) <= datetime.now(UTC)
+TimelinePatchPayloadStore = ExpiringPayloadStore
+PendingTimelinePatchEgressStore = ExpiringPayloadStore
+GenerationPayloadStore = ExpiringPayloadStore
 
 
 class TimelinePatchPlanningService:

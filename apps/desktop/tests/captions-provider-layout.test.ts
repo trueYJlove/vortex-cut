@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { cssSpecificity, parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * C 族「列表型」· 形态 3（AI 字幕优化）回归（2026-11-09）。
@@ -18,46 +18,9 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 另：.captions-provider-diff 原有两处硬编码色值（#cfd8dd / #8fa0a8）。
  */
 
-const raw = readDesktopStyles();
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1, j = i + 1, body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j]; j += 1;
-      }
-      order += 1;
-      out.push({ selectors: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean), body, order, inMedia: stack.length > 0 });
-      i = j; continue;
-    }
-    if (ch === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += ch;
-  }
-  return out;
-}
-const RULES = parseRules(css);
-const specOf = (sel: string): number[] => {
-  let e = sel, prev = "";
-  while (prev !== e) { prev = e; e = e.replace(/:not\(([^)]*)\)/g, " $1 "); }
-  return [
-    (e.match(/#[\w-]+/g) ?? []).length,
-    (e.match(/\.[\w-]+/g) ?? []).length + (e.match(/\[[^\]]+\]/g) ?? []).length + (e.match(/:(?!not\()[\w-]+/g) ?? []).length,
-    (e.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length,
-  ];
-};
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
+const RULES = parseCssRules(css);
+const specOf = cssSpecificity;
 const cmp = (a: number[], b: number[]) => { for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
 const declared = (body: string, prop: string): string | null => {
   const m = new RegExp("(?:^|;)\\s*" + prop + "\\s*:\\s*([^;]+)", "i").exec(body);

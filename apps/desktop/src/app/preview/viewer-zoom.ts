@@ -2,6 +2,8 @@
  *  坐标全部是 viewer 客户区 CSS px；view.z 是 fittedSize 的倍数，cx/cy 是画面中心点份额。
  *  画面按布局尺寸绘制（width/height），父容器不做 transform:scale —— 手柄保持屏幕 px。
  */
+import { clamp } from "../math.js";
+
 export type Size = { w: number; h: number };
 export type Point = { x: number; y: number };
 export type ViewerView = { z: number; cx: number; cy: number };
@@ -12,8 +14,6 @@ export const ZOOM_MAX_PX = 8;
 export const ZOOM_SETTLE_MS = 700;
 const WHEEL_STEP_MAX = 25;
 const WHEEL_PX_PER_E = 100;
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export const isFit = (v: ViewerView): boolean => v.z === FIT_VIEW.z && v.cx === FIT_VIEW.cx && v.cy === FIT_VIEW.cy;
 export const zoomMax = (fitK: number): number => Math.max(1, ZOOM_MAX_PX / Math.max(1e-6, fitK));

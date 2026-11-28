@@ -223,7 +223,3 @@ class ClipTokenizer:
 def load_tokenizer(path: str) -> ClipTokenizer:
     """按路径缓存（合并表 5 万条，重复构造代价高）。"""
     return ClipTokenizer(path)
-
-
-def tokenize_clip(text: str, tokenizer_path: str | Path, context_len: int = DEFAULT_CONTEXT_LEN):
-    return load_tokenizer(str(tokenizer_path)).encode(text, context_len)

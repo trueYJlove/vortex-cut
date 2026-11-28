@@ -1,5 +1,5 @@
 import type { JobId, ModelId, ProjectId, TranscriptId } from "@aivideo/contracts";
-import { normalizeJob } from "../../../src/lib/core-client.js";
+import { normalizeJob } from "./job-normalize.js";
 import {
   API_PREFIX,
   asId,

@@ -1,4 +1,5 @@
 import { throwIfAborted } from "./worker-lifecycle.js";
+import { clamp } from "../math.js";
 import { AudioSourceCache } from "./audio-source-cache.js";
 import { AudioStreamLoader } from "./audio-stream.js";
 import { PcmChunkCache, PCM_CHUNK_SAMPLES } from "./pcm-chunk-cache.js";
@@ -235,8 +236,6 @@ function overlayNeeds(frame: IrFrame): Array<[string, number]> {
 function shiftedRect(rect: IrContent, shift: { dx: number; dy: number }): IrContent {
   return { x: rect.x + shift.dx, y: rect.y + shift.dy, w: rect.w, h: rect.h };
 }
-
-const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 
 /** 分位数（最近秩，**不复制不改写入参**）。与 metrics() 内的同名计算同口径：
  *  取 floor(q * n) 处的样本。按需代理判定与指标条必须用同一个 p95 定义，

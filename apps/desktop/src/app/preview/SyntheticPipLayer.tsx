@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TimelineClipMask } from "@aivideo/contracts";
 import { boxResizeFromHandle, HANDLES, PIP_SCALE_MAX, PIP_SCALE_MIN, type HandleDir } from "../pipResizeGeometry.js";
+import { clamp } from "../math.js";
 import {
   CORNERS, GESTURE_HINT, HANDLE_BOX_MIN, IDLE_PRESS,
   cornerHitRect, edgeHitRect, gestureHintText, pickTopmostBox,
@@ -77,7 +78,6 @@ interface GestureState {
   committed: boolean;
 }
 
-const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
 const CORNER_ANGLE: Record<CornerDir, number> = { nw: 45, ne: 135, se: 45, sw: 135 };
 const EDGE_ANGLE: Record<EdgeDir, number> = { n: 90, s: 90, e: 0, w: 0 };
 const ROTATE_AT: Record<CornerDir, number> = { ne: 0, se: 90, sw: 180, nw: 270 };

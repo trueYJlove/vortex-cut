@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import sqlite3
 from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
-from .ids import new_id
+from .hashing import (
+    canonical_json as _canonical_json,
+    sha256_canonical as _sha256_value,
+    sha256_text as _sha256_text,
+)
+from .ids import new_id, validate_id
 from .projects import DomainError
 
 GENERATION_KINDS = {"image", "tts"}
 RETRYABLE_STATUSES = {"failed", "cancelled", "interrupted"}
 EXECUTION_MODE = "simulation_only"
-_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
 _SENSITIVE_KEYS = {
     "path",
     "uri",
@@ -31,26 +34,8 @@ _SENSITIVE_KEYS = {
 }
 
 
-def _canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _sha256_value(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
-
-
-def _sha256_text(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _id(value: Any, field: str) -> str:
-    if (
-        not isinstance(value, str)
-        or not 1 <= len(value) <= 128
-        or any(c not in _ID_CHARS for c in value)
-    ):
-        raise DomainError("GENERATION_REQUEST_INVALID", f"{field} 无效")
-    return value
+    return validate_id(value, "GENERATION_REQUEST_INVALID", f"{field} 无效")
 
 
 def _reject_sensitive(value: Any) -> None:

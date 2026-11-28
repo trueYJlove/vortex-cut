@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import hashlib
 import json
 import time
 import unicodedata
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
-from .ids import new_id
+from .hashing import canonical_json, sha256_canonical as sha256
+from .ids import new_id, validate_id
+from .payload_store import ExpiringPayloadStore
 from .projects import DomainError
 from .providers import (
     CANDIDATE_ADAPTER_IDS,
@@ -47,51 +47,9 @@ CV_MAX_SCENES = 160
 CV_SPARSE_MOTION_WEIGHT = 0.5
 
 
-class CandidatePayloadStore:
-    """Short-lived process-only Candidate payload boundary; values are never serialized."""
-
-    def __init__(self) -> None:
-        self._values: dict[str, dict[str, Any]] = {}
-        self._lock = Lock()
-
-    def put(self, key: str, value: dict[str, Any]) -> None:
-        with self._lock:
-            self._values[key] = value
-
-    def take(self, key: str) -> dict[str, Any] | None:
-        with self._lock:
-            value = self._values.pop(key, None)
-        if not value or datetime.fromisoformat(
-            value["expires_at"].replace("Z", "+00:00")
-        ) <= datetime.now(UTC):
-            return None
-        return value
-
-    def get(self, key: str) -> dict[str, Any] | None:
-        with self._lock:
-            value = self._values.get(key)
-        if not value or datetime.fromisoformat(
-            value["expires_at"].replace("Z", "+00:00")
-        ) <= datetime.now(UTC):
-            self.discard(key)
-            return None
-        return value
-
-    def discard(self, key: str) -> None:
-        with self._lock:
-            self._values.pop(key, None)
-
-
-PendingCandidateEgressStore = CandidatePayloadStore
-CandidateGenerationPayloadStore = CandidatePayloadStore
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def sha256(value: Any) -> str:
-    return f"sha256:{hashlib.sha256(canonical_json(value).encode()).hexdigest()}"
+CandidatePayloadStore = ExpiringPayloadStore
+PendingCandidateEgressStore = ExpiringPayloadStore
+CandidateGenerationPayloadStore = ExpiringPayloadStore
 
 
 def document_sha256(document: dict[str, Any]) -> str:
@@ -132,14 +90,7 @@ def _clean_text(value: Any, minimum: int, maximum: int, field: str) -> str:
 
 
 def _id(value: Any, code: str = "PLANNING_INVALID") -> str:
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value) > 128
-        or any(not (x.isascii() and (x.isalnum() or x in "_-")) for x in value)
-    ):
-        raise DomainError(code, "标识符无效")
-    return value
+    return validate_id(value, code, "标识符无效")
 
 
 class RecipeRegistry:

@@ -516,7 +516,6 @@ packages/contracts/
 
 services/core/
   src/aivs_core/             FastAPI 入口、应用服务、SQLite 持久化与领域逻辑
-    migrations/              版本化 SQLite 迁移脚本
     editing_grammar/ media/ rendering/ renditions/
   tests/
     unit/                    Core 单元测试与仓库级文档一致性/术语守卫

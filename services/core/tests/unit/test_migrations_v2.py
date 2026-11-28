@@ -97,8 +97,8 @@ class TestMigrationV2:
                 row[0] for row in db.execute("SELECT version FROM schema_migrations ORDER BY rowid")
             ]
         assert versions == [f"v{i}" for i in range(1, len(MIGRATIONS) + 1)]
-        # each migration writes a pre-flight backup
-        assert len(list((tmp_path / "backups").glob("app-*.db"))) >= 2
+        # each initialize() with pending migrations writes a pre-flight backup
+        assert len(list((tmp_path / "backups").glob("app-*.db"))) >= 1
 
     def test_v2_tables_and_indexes_exist(self, tmp_path: Path):
         db_path = _init(tmp_path)

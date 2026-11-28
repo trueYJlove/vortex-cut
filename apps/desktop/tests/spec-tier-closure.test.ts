@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 规范档位闭环：DESIGN.md 定义的每一档，实现里不得出现档外取值（2026-11-09）。
@@ -25,33 +25,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
 const design = readFileSync(resolve(root, "../../docs/specs/desktop-ui.md"), "utf8");
-
-type Rule = { sels: string[]; body: string; inMedia: boolean };
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1, j = i + 1, body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j]; j += 1;
-      }
-      out.push({ sels: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean), body, inMedia: stack.length > 0 });
-      i = j; continue;
-    }
-    if (ch === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += ch;
-  }
-  return out;
-}
-const RULES = parseRules(css);
+const RULES = parseCssRules(css);
 
 // DESIGN.md §3.2 的档位（2026-11-09 补全后）
 // 15px 是「图标按钮」字号：图标 15px 时文字同尺寸才不会错位（规范 §3.2 已补）。
@@ -76,15 +50,15 @@ describe("规范闭环：实现里的字号不越档", () => {
   it("弹窗内的 font-size 都是规范档位之一", () => {
     const offenders: string[] = [];
     for (const rule of RULES) {
-      if (!rule.sels.some(s => /\.modal/.test(s))) continue;   // 只管弹窗作用域
+      if (!rule.selectors.some(s => /\.modal/.test(s))) continue;   // 只管弹窗作用域
       for (const m of rule.body.matchAll(/font-size\s*:\s*([\d.]+)px/g)) {
         const v = parseFloat(m[1]);
-        if (!FONT_TIERS.includes(v)) offenders.push(`${rule.sels[0]}: ${v}px`);
+        if (!FONT_TIERS.includes(v)) offenders.push(`${rule.selectors[0]}: ${v}px`);
       }
       // font 简写也会设字号（曾藏过 9px）
       for (const m of rule.body.matchAll(/font\s*:\s*([\d.]+)px\s/g)) {
         const v = parseFloat(m[1]);
-        if (!FONT_TIERS.includes(v)) offenders.push(`${rule.sels[0]} (font 简写): ${v}px`);
+        if (!FONT_TIERS.includes(v)) offenders.push(`${rule.selectors[0]} (font 简写): ${v}px`);
       }
     }
     expect(offenders, `字号越档（规范档位：${FONT_TIERS.join(" / ")}）：\n${offenders.join("\n")}`).toEqual([]);
@@ -95,7 +69,7 @@ describe("规范闭环：弹窗内按钮高度不越档", () => {
   it("按钮本体高度都是规范档位之一", () => {
     const offenders: string[] = [];
     for (const rule of RULES) {
-      for (const sel of rule.sels) {
+      for (const sel of rule.selectors) {
         if (!/\.modal/.test(sel)) continue;           // 只看弹窗内
         if (!/button|\.btn|command-option/.test(sel)) continue;
         // 排除图标（svg / .icon）与伪元素指示线——它们不是按钮本体

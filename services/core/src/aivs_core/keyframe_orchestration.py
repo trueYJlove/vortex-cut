@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from .database import Database
-from .ids import new_id
 from .keyframe_egress import KeyframeEgressService
 from .media.cv_signals import CV_ALGORITHM_VERSION
 from .media.keyframe_encode import encode_frames
@@ -106,8 +105,3 @@ def ensure_video_asset(asset_row: dict[str, Any]) -> None:
         raise DomainError("VISION_FRAMES_UNMAPPED", "该素材不是视频，无法抽帧")
     if asset_row.get("availability") != "available":
         raise DomainError("ASSET_MISSING", "素材当前不可用")
-
-
-def new_generation_marker() -> str:
-    """便于测试与日志追溯的生成序号（不落库，仅用于本次调用）。"""
-    return new_id()

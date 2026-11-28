@@ -35,11 +35,3 @@ async def run_process(
         stdout[:max_output].decode("utf-8", errors="replace"),
         stderr[-32768:].decode("utf-8", errors="replace"),
     )
-
-
-def terminate_process(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None:
-        if os.name == "nt":
-            process.kill()
-        else:
-            process.terminate()

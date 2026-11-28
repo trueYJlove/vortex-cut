@@ -107,6 +107,7 @@
 | P192/P194 | E2E 选择器与剩余缺陷收口 | 工作包 | 🟡 主链已修，余 `stage4d` 网关/凭据与 `p33-seek-play` | [`BACKLOG#p194`](BACKLOG.md#p194) |
 | Wave1-L3 | Wave 1 剪辑手法真机听感签字 | 人工验收 | ⏳ 自动化已覆盖机器可判项，待人工听感确认 | [`BACKLOG#wave1-l3`](BACKLOG.md#wave1-l3) |
 | AI-Misc | 4K60 1.0s 差异 / `json_schema` 兼容 | 已知边界 | 🟡 4K60 远低于 10s 门；`script` 适配器为主通路 | [`BACKLOG#ai-misc`](BACKLOG.md#ai-misc) |
+| TD-WaveD | 代码与测试结构债（TD-01..TD-05 延后专题） | 技术债 | ⏳ 2026-11-28 审计登记，按需分专题推进 | [BACKLOG#td-wave-d](BACKLOG.md#td-wave-d) |
 
 ---
 

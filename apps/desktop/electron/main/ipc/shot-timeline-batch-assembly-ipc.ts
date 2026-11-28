@@ -7,6 +7,7 @@ import {
   parseShotRequirementTimelineBatchAssemblyPrepareInput,
   parseShotRequirementTimelineBatchAssemblyPreview,
 } from "@aivideo/contracts";
+import { asId, asRecord } from "./shared.js";
 
 type Handler = (_event: unknown, value?: unknown) => Promise<unknown> | unknown;
 type Registrar = { handle(channel: string, listener: Handler): void };
@@ -47,17 +48,6 @@ async function safeInvoke<T>(operation: () => Promise<T>): Promise<T> {
     if (typeof code === "string" && rendererErrorCodes.has(code)) throw new Error(code);
     throw new Error("Core request failed");
   }
-}
-function asRecord(value: unknown, allowed: readonly string[], name: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some(key => !allowed.includes(key))) throw new Error(`Invalid ${name}`);
-  return value as Record<string, unknown>;
-}
-function asId(value: unknown, name: string): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
-    throw new Error(`Invalid ${name}`);
-  }
-  return value;
 }
 function projectPath(input: Record<string, unknown>): string {
   return `/api/v1/projects/${asId(input.project_id, "project_id")}/shot-requirement-timeline-batch-assemblies`;

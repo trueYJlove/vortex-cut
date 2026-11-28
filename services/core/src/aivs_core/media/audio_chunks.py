@@ -56,11 +56,6 @@ class PcmChunkError(RuntimeError):
         self.message = message
 
 
-def pcm_chunk_bytes(start_sample: int, samples: int) -> int:
-    """块产物总字节估算（头 + 交错 f32）。"""
-    return HEADER_BYTES + samples * CHANNELS * PCM_BYTES_PER_SAMPLE
-
-
 def parse_chunk_header(data: bytes) -> dict[str, int]:
     """解析块头。损坏（尺寸不足）→ ValueError。"""
     if len(data) < HEADER_BYTES:

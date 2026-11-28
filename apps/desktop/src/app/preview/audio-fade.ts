@@ -16,6 +16,8 @@
  * envelope ∈ [0, 1]。位置用**段内时间**（导出侧 afade 的 st/d 口径）。
  */
 
+import { clamp01 } from "../math.js";
+
 /** 已按段时长夹住的淡入/淡出时长（微秒）；`(0, 0)` 表示完全不淡。 */
 export interface AudioFadeSpan {
   fadeInUs: number;
@@ -42,8 +44,6 @@ export function resolveAudioFade(fadeInUs: unknown, fadeOutUs: unknown, duration
   }
   return { fadeInUs: fadeIn, fadeOutUs: fadeOut };
 }
-
-const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 /** 段内位置 `positionUs` 处的淡变系数（0..1）；无淡变恒为 1。 */
 export function audioFadeEnvelope(span: AudioFadeSpan, durationUs: number, positionUs: number): number {

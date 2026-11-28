@@ -1,31 +1,21 @@
 from __future__ import annotations
 
-import hashlib
 import hmac
-import json
-import re
 import sqlite3
 from typing import Any
 
 from .database import Database, utc_now
-from .ids import new_id
+from .hashing import sha256_canonical as _hash
+from .ids import new_id, validate_id
 from .projects import DomainError
 from .provider_image_generation import ProviderImageGenerationService
 from .provider_images import PromptVault
 
-_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _TERMINAL = {"succeeded", "failed", "cancelled", "interrupted"}
 
 
 def _id(value: Any, field: str) -> str:
-    if not isinstance(value, str) or _ID.fullmatch(value) is None:
-        raise DomainError("SHOT_REQUIREMENT_IMAGE_FULFILLMENT_INVALID", f"{field} 无效")
-    return value
-
-
-def _hash(value: Any) -> str:
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return validate_id(value, "SHOT_REQUIREMENT_IMAGE_FULFILLMENT_INVALID", f"{field} 无效")
 
 
 class ShotRequirementImageFulfillmentService:

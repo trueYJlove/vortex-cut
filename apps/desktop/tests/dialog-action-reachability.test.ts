@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { extractCssBlocks, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 弹窗可操作性回归（2026-11-06 真机测量发现）。
@@ -23,20 +23,7 @@ const appSource = readFileSync(resolve(desktopRoot, "src/app/layout/AppDialogs.t
 const projectLibrarySource = readFileSync(resolve(desktopRoot, "src/app/ProjectLibraryDialog.tsx"), "utf8");
 const dialogSource = readFileSync(resolve(desktopRoot, "src/app/Dialog.tsx"), "utf8");
 
-function rules(source: string): Array<{ selector: string; body: string }> {
-  const out: Array<{ selector: string; body: string }> = [];
-  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(stripped)) !== null) {
-    const selector = match[1].trim();
-    if (selector.startsWith("@")) continue;
-    out.push({ selector, body: match[2] });
-  }
-  return out;
-}
-
-const allRules = rules(css);
+const allRules = extractCssBlocks(css);
 
 describe("分步弹窗的操作行必须吸附在可见区底部", () => {
   it("存在正文末个操作行的 sticky 规则", () => {

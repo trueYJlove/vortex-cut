@@ -4,6 +4,7 @@ import type { TimelineClip } from "@aivideo/contracts";
 import { HANDLES, pipResizeFromHandle, type HandleDir } from "./pipResizeGeometry.js";
 import { CORNERS, resizeCursor, rotateCellRect, rotateCursor, showEdgeMark, zRankByTracks, type CornerDir } from "./preview/stage-interaction.js";
 import { clampMediaRate, mediaRateIsPlayable } from "./preview/media-rate.js";
+import { clamp } from "./math.js";
 
 /**
  * P1 画中画（PIP）：在交互预览画布上显示覆盖轨（V2+）片段的可视框。
@@ -95,8 +96,6 @@ function maskClipPath(mask: PipMask): string | undefined {
   if (mask.kind === "rect") return `inset(${y - h / 2}% ${100 - (x + w / 2)}% ${100 - (y + h / 2)}% ${x - w / 2}%)`;
   return `polygon(0% 0%, 100% 0%, 100% ${Math.min(100, y + 12)}%, ${x}% ${y}%, 0% ${y}%)`;
 }
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 const CORNER_ANGLE: Record<CornerDir, number> = { nw: 45, ne: 135, se: 45, sw: 135 };
 const EDGE_ANGLE: Record<"n" | "s" | "e" | "w", number> = { n: 90, s: 90, e: 0, w: 0 };

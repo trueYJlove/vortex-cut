@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { compareSpecificity as compare, cssSpecificity as specificity, extractCssBlocks as rules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 转录片段行排版回归（2026-10-08 用户实测）。
@@ -20,33 +20,6 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  */
 
 const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
-
-/** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 参数计入，自身不计）。 */
-function specificity(selector: string): [number, number, number] {
-  let expanded = selector;
-  let previous = "";
-  while (previous !== expanded) {
-    previous = expanded;
-    expanded = expanded.replace(/:not\(([^)]*)\)/g, " $1 ");
-  }
-  const ids = (expanded.match(/#[\w-]+/g) ?? []).length;
-  const classes = (expanded.match(/\.[\w-]+/g) ?? []).length
-    + (expanded.match(/\[[^\]]+\]/g) ?? []).length
-    + (expanded.match(/:(?!not\()[\w-]+/g) ?? []).length;
-  const types = (expanded.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length;
-  return [ids, classes, types];
-}
-
-function compare(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
-  return 0;
-}
-
-function rules(source: string): Array<{ selector: string; body: string }> {
-  return [...source.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .filter(match => !match[1].trim().startsWith("@"))
-    .map(match => ({ selector: match[1].trim(), body: match[2] }));
-}
 
 const selectorList = (selector: string) => selector.split(",").map(part => part.replace(/\s+/g, " ").trim()).filter(Boolean);
 

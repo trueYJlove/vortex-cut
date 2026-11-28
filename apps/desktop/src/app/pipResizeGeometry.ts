@@ -26,10 +26,10 @@ const RESIZE_GEOM: Record<HandleDir, { ax: "left" | "right" | null; ay: "top" | 
   w: { ax: "right", ay: null },
 };
 
+import { clamp } from "./math.js";
+
 export const PIP_SCALE_MIN = 0.05;
 export const PIP_SCALE_MAX = 5;
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export type PipBox = { x: number; y: number; scale: number };
 

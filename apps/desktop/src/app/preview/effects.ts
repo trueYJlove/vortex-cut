@@ -14,6 +14,8 @@
  *   标定 2026-09-17）。keying.invert 权威端不消费——同语义忽略。
  */
 
+import { clamp01 } from "../math.js";
+
 export interface IrEffectMask {
   kind: "linear" | "rect" | "ellipse";
   x?: number;
@@ -31,8 +33,6 @@ export interface IrEffectKeying {
   blend?: number;
   invert?: boolean;
 }
-
-const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
 /** FFmpeg colorkey key 色 → 归一化 RGB（0..1）。非法/缺省回绿幕 00FF00。 */
 export function keyingColorRgb(keying: IrEffectKeying): [number, number, number] {

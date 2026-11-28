@@ -173,3 +173,15 @@
 ### Wave1-L3 · 剪辑手法桌面真机听感 / 审美人工签字 {#wave1-l3}
 - **类型 / 状态**：人工验收｜⏳ **自动化（`wave1-editing-tools.electron.spec.ts`）已覆机器可判项，待人工听感签字**
 - **出处**：[`specs/timeline-and-editing.md`](specs/timeline-and-editing.md) §5.4
+
+---
+
+## 5. 代码与测试结构债（Wave D 延后专题） {#td-wave-d}
+
+> 来源：2026-11-28 代码与测试审计中识别的重型结构重构项，均已从日常加速/去重轮次中显式延后，后续按专题独立规划门推进。
+
+- **TD-01 · Core 巨型单文件拆层**：`services/core/src/aivs_core/{timeline,database,rendering/ffmpeg,rendering/ir}.py` 职责高度耦合（Schema / 迁移 / 领域校验 / 命令编译同文件），后续按子域垂直拆包。
+- **TD-02 · Desktop 巨型会话与根组件拆分**：`apps/desktop/src/app/preview/preview-session.ts`（~2,840 行）与 `App.tsx` 状态编排待拆分为独立控制器与子视图钩子。
+- **TD-03 · 跨 IPC 域敏感字段与分页校验统一**：各 Electron Main IPC 模块对 `rendererSafe` 敏感键集合存在域内特化要求（如 `document`、`requirement`、`visual_direction` 等）；需逐域审计统一策略后，再收敛 `rendererSafe` 与 `pageQuery`。
+- **TD-04 · SQLite 历史迁移快照归并**：`database.py` 当前保留 44 个增量 SQLite 迁移版本（仅做初始化空库时的单次预备与同版兼容检查加速）；长期需评估基线 Schema 快照归并与旧版升级验证方案。
+- **TD-05 · CSS 样式守卫测试与真实 DOM/布局快照收敛**：`apps/desktop/tests/` 中约 20 份静态 CSS 级联守卫测试已收敛解析/特异性公共辅助函数；长期可逐步将脆弱规则文本断言替换为集中令牌契约与真实布局测试。

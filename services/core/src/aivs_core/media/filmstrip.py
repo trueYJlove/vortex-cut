@@ -93,28 +93,6 @@ def filmstrip_args(input_path: str, step_ms: int, cell_w: int, duration_s: float
     ]
 
 
-def sprite_metadata(step_ms: int, cell_w: int, sprite_w: int, sprite_h: int,
-                    duration_us: int) -> dict[str, Any]:
-    """sprite 元数据（旁挂 JSON；画布采样用）。
-
-    cell_h = sprite_h / count（tile 均分行）；count = round(sprite_h / cell_h_est)
-    由 ffmpeg 产出后按实际高度反推——tile 行数即格数。
-    """
-    cell_h = None
-    count = None
-    # 由调用方在拿到 sprite 后按 cell_w 宽度比反推：真实 cell_h 由元数据写入方
-    # 用 ffmpeg 输出的 tile 行数决定（见 generate_filmstrip 的返回）。
-    return {
-        "step_ms": step_ms,
-        "cell_w": cell_w,
-        "cell_h": cell_h,
-        "count": count,
-        "sprite_w": sprite_w,
-        "sprite_h": sprite_h,
-        "duration_us": duration_us,
-    }
-
-
 async def generate_filmstrip(
     ffmpeg: Path,
     input_path: Path,
@@ -235,12 +213,6 @@ def _jpeg_size(data: bytes) -> tuple[int, int]:
             return (0, 0)
         i += 2 + seg_len
     return (0, 0)
-
-
-def parse_sprite_meta(data: bytes) -> dict[str, Any]:
-    """读 sprite 旁挂 JSON 元数据（Renderer 经取件通道拿到的是 sprite 本体，
-    元数据由 Core 侧 API 直出——此函数供作业体/测试复核用）。"""
-    return json_loads(data.decode("utf-8"))
 
 # ---- WP-P232 服务层（缓存键/作业登记/作业执行；waveform 同构） ----
 

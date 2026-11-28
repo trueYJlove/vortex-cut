@@ -8,6 +8,7 @@ from typing import Any
 
 from .database import Database, json_dumps, json_loads, utc_now
 from .ids import new_id
+from .payload_store import ExpiringPayloadStore as GenerationPayloadStore, is_expired as _expired
 from .planning import ProviderRepository, canonical_json, invocation_cost, sha256
 from .projects import DomainError
 from .providers import (
@@ -17,11 +18,7 @@ from .providers import (
     OpenAICompatibleTextProvider,
 )
 from .timeline import TimelineService, timeline_diff
-from .timeline_planning import (
-    GenerationPayloadStore,
-    PendingTimelinePatchEgressStore,
-    _expired,
-)
+from .timeline_planning import PendingTimelinePatchEgressStore
 
 # AI-1（ADR-0003 D2 / AI_1_AGENT_SESSION_PLANNING_GATE）：Stage 2B 单发提案
 # 升级为有界多步循环。设计要点（Planning Gate §2 裁决）：

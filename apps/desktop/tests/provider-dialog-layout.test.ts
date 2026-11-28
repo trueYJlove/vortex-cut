@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { extractCssBlocks, readDesktopStyles } from "./helpers/read-styles.js";
 
-const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
+const blocks = extractCssBlocks(readDesktopStyles());
 function rules(selector: string) {
-  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .filter(match => match[1].trim() === selector)
-    .map(match => match[2]);
+  return blocks.filter(block => block.selector === selector).map(block => block.body);
 }
 
 /**

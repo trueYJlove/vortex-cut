@@ -36,12 +36,6 @@ IR_SCHEMA = "preview-ir-v1"
 # V1 特权移除；layers 条目带 box/shift/rotation/alpha/effects（opacity 全段生效，
 # 移除「PiP overlay 忽略 transform.opacity」近似）。main/overlays 保留为兼容
 # 字段（main = 时间序首段或 black；overlays = 非首段旧形状条目）。
-# v5（2026-11-03）：输入 geometry 携带显示方向——新增 display_width/display_height/
-# rotation（width/height 仍表示解码平面尺寸，供纹理上传）；_fit_content_box 与
-# crop_fill 改为**按显示方向**计算内容盒（竖拍素材不再被当成横版铺满画布）；
-# ffprobe 旋转解析改为扫描整个 side_data_list（iPhone 的 side_data_list[0] 是
-# Dolby Vision 记录，只看 [0] 取不到 rotation）。旧条目缺 display_* ⇒ 旧布局语义，
-# 必须整体失效。
 # v4（2026-10-10）：主轨空时以可见覆盖轨终点作时长下限（对齐权威端「全程黑场+
 # 覆盖轨叠加」）；v3（2026-09-17 v0.4）：覆盖轨 mask/keying 重入（overlay 条目携带 effects）。
 # v7（P231 复核修复）：统一盒模型真正落地——跨轨重叠不再串成 concat 时间链、

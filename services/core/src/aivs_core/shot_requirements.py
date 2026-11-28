@@ -8,10 +8,9 @@ import unicodedata
 from typing import Any
 
 from .database import Database, utc_now
-from .ids import new_id
+from .ids import new_id, validate_id
 from .projects import DomainError
 
-_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _SENSITIVE_KEYS = {
     "path",
     "uri",
@@ -36,9 +35,7 @@ def _fail(code: str, message: str) -> None:
 
 
 def _id(value: Any, field: str = "id") -> str:
-    if not isinstance(value, str) or not _ID.fullmatch(value):
-        _fail("SHOT_LIST_INVALID", f"{field} 不合法")
-    return value
+    return validate_id(value, "SHOT_LIST_INVALID", f"{field} 不合法")
 
 
 def _reject_sensitive(value: Any) -> None:

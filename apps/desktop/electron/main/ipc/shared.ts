@@ -33,6 +33,13 @@ export function asId(value: unknown, name: string): string {
   return value;
 }
 
+export function asRecord(value: unknown, allowedKeys: readonly string[], name: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !allowedKeys.includes(key))) {
+    throw new Error(`Invalid ${name}`);
+  }
+  return value as Record<string, unknown>;
+}
+
 export function buildQuery(input: Record<string, unknown>, omit: string[] = []): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(input)) {

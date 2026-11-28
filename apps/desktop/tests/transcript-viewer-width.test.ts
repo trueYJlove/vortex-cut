@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 原始转录（transcript-viewer）— C 族审计结论（2026-11-09）。
@@ -16,37 +16,8 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 跨度列 x 唯一、分隔线一致、动作区对齐——均无需改动。
  */
 
-const raw = readDesktopStyles();
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1, j = i + 1, body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j]; j += 1;
-      }
-      order += 1;
-      out.push({ selectors: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean), body, order, inMedia: stack.length > 0 });
-      i = j; continue;
-    }
-    if (ch === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += ch;
-  }
-  return out;
-}
-const RULES = parseRules(css);
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
+const RULES = parseCssRules(css);
 const declared = (body: string, prop: string): string | null => {
   const m = new RegExp("(?:^|;)\\s*" + prop + "\\s*:\\s*([^;]+)", "i").exec(body);
   return m ? m[1].trim() : null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 危险语义令牌（2026-11-09）。
@@ -31,40 +31,11 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 3. 危险色令牌区自身不含 #hex 以外的散落用法（防止有人新增第 10 种红）。
  */
 
-const raw = readDesktopStyles();
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { sels: string[]; body: string; order: number; inMedia: boolean };
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1, j = i + 1, body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j]; j += 1;
-      }
-      order += 1;
-      out.push({ sels: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean), body, order, inMedia: stack.length > 0 });
-      i = j; continue;
-    }
-    if (ch === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += ch;
-  }
-  return out;
-}
-const RULES = parseRules(css);
+const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
+const RULES = parseCssRules(css);
 
 function effective(selector: string, prop: string): string | null {
-  const owners = RULES.filter(r => !r.inMedia && r.sels.includes(selector));
+  const owners = RULES.filter(r => !r.inMedia && r.selectors.includes(selector));
   for (let i = owners.length - 1; i >= 0; i -= 1) {
     const m = new RegExp("(?:^|;)\\s*" + prop + "\\s*:\\s*([^;]+)", "i").exec(owners[i].body);
     if (m) return m[1].trim();
@@ -88,7 +59,7 @@ describe("危险语义令牌：六个令牌都已定义", () => {
 
   it("令牌值是原始色值（视觉零变化，不做推导）", () => {
     // 若有人改成 color-mix(...) 推导，配比会失真——见本文件头部说明
-    const rootBlock = RULES.filter(r => r.sels.includes(":root")).map(r => r.body).join("\n");
+    const rootBlock = RULES.filter(r => r.selectors.includes(":root")).map(r => r.body).join("\n");
     for (const token of TOKENS) {
       const m = new RegExp(token + ":\\s*([^;]+)").exec(rootBlock);
       expect(m, token + " 未在 :root 中").toBeTruthy();
@@ -120,7 +91,7 @@ describe("危险语义令牌：不再新增第 10 种红", () => {
   it("危险令牌区内只有 6 个 #hex（即可预期的收敛数量）", () => {
     // 直接取「含 --dlg-danger-text 的那条 :root 规则体」，不要按字符串反查 :root，
     // 因为多个 :root 块存在，indexOf 会定位到错误的那一个。
-    const block = RULES.filter(r => r.sels.includes(":root") && r.body.includes("--dlg-danger-text"))
+    const block = RULES.filter(r => r.selectors.includes(":root") && r.body.includes("--dlg-danger-text"))
       .map(r => r.body).join("\n");
     expect(block, "找不到危险令牌的 :root 块").not.toBe("");
     const hexes = [...block.matchAll(/#[0-9a-fA-F]{6}\b/g)].map(m => m[0].toLowerCase());

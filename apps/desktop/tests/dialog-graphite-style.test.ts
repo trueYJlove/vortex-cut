@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { compareSpecificity as compare, cssSpecificity as specificity, parseCssRules as rules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * Graphite Precision 对话框层回归（apps/desktop/tests/fixtures/dialog-system-v2）。
@@ -14,79 +14,9 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
 const raw = readDesktopStyles();
 const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** 计算选择器特异性 [id, class/attr/pseudo-class, type]（:not() 参数计入，自身不计）。 */
-function specificity(selector: string): [number, number, number] {
-  let expanded = selector;
-  let previous = "";
-  while (previous !== expanded) {
-    previous = expanded;
-    expanded = expanded.replace(/:not\(([^)]*)\)/g, " $1 ");
-  }
-  const ids = (expanded.match(/#[\w-]+/g) ?? []).length;
-  const classes = (expanded.match(/\.[\w-]+/g) ?? []).length
-    + (expanded.match(/\[[^\]]+\]/g) ?? []).length
-    + (expanded.match(/:(?!not\()\w+/g) ?? []).length;
-  const types = (expanded.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length;
-  return [ids, classes, types];
-}
-
-function compare(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
-  return 0;
-}
-
 type Rule = { selector: string; body: string; order: number; atRule: string | null };
 
-/**
- * 抽出所有规则并记录其 at-rule 上下文（@media 内 / 顶层）。
- * 必须区分：媒体查询里的窄屏 / 小高度变体与顶层基础规则同名同权，
- * 若混在一起，「基础值」断言会被变体顶包（负向对照当场暴露过）。
- */
-function rules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    if (char === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) {
-        stack.push(prelude);
-        continue;
-      }
-      // 读取声明块到配对的 }
-      let depth = 1;
-      let j = i + 1;
-      let body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j];
-        j += 1;
-      }
-      order += 1;
-      out.push({
-        selector: prelude,
-        body,
-        order,
-        atRule: stack.find(item => item.startsWith("@media")) ?? null,
-      });
-      i = j;
-      continue;
-    }
-    if (char === "}") {
-      stack.pop();
-      buffer = "";
-      continue;
-    }
-    buffer += char;
-  }
-  return out;
-}
-
-const ALL = rules(css);
+const ALL: Rule[] = rules(css);
 const selectorList = (selector: string) =>
   selector.split(",").map(part => part.replace(/\s+/g, " ").trim()).filter(Boolean);
 

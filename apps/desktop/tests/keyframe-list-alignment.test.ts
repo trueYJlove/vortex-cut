@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { cssSpecificity as specificity, parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * C 族「列表型」行对齐的级联回归（2026-11-09）。
@@ -16,63 +16,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 断言某段文本存在（"写了但被更高特异性规则压掉" 正是这类缺陷最初的失效方式）。
  */
 
-const raw = readDesktopStyles();
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { selectors: string[]; body: string; order: number; inMedia: boolean };
-
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    if (char === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1;
-      let j = i + 1;
-      let body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j];
-        j += 1;
-      }
-      order += 1;
-      out.push({
-        selectors: prelude.split(",").map(p => p.replace(/\s+/g, " ").trim()).filter(Boolean),
-        body, order, inMedia: stack.length > 0,
-      });
-      i = j;
-      continue;
-    }
-    if (char === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += char;
-  }
-  return out;
-}
-
-const RULES = parseRules(css);
-
-/** 特异性 [id, class/attr/pseudo-class, type]；:not() 参数计入、自身不计。 */
-function specificity(selector: string): [number, number, number] {
-  let expanded = selector;
-  let previous = "";
-  while (previous !== expanded) {
-    previous = expanded;
-    expanded = expanded.replace(/:not\(([^)]*)\)/g, " $1 ");
-  }
-  return [
-    (expanded.match(/#[\w-]+/g) ?? []).length,
-    (expanded.match(/\.[\w-]+/g) ?? []).length
-      + (expanded.match(/\[[^\]]+\]/g) ?? []).length
-      + (expanded.match(/:(?!not\()[\w-]+/g) ?? []).length,
-    (expanded.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length,
-  ];
-}
+const RULES = parseCssRules(readDesktopStyles());
 
 const cmp = (a: number[], b: number[]) => {
   for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];

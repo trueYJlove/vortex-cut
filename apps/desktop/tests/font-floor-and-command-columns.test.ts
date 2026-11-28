@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readDesktopStyles } from "./helpers/read-styles.js";
+import { cssSpecificity as spec, parseCssRules, readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
  * 字号下限与命令搜索列对齐（2026-11-09，用户以截图标出）。
@@ -27,54 +27,13 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
  * 即**系统默认字体栈**，Inter 只是无效占位。
  */
 
-const raw = readDesktopStyles();
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-
-type Rule = { sels: string[]; body: string; order: number; inMedia: boolean };
-function parseRules(source: string): Rule[] {
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let buffer = "";
-  let order = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (ch === "{") {
-      const prelude = buffer.replace(/\s+/g, " ").trim();
-      buffer = "";
-      if (prelude.startsWith("@")) { stack.push(prelude); continue; }
-      let depth = 1, j = i + 1, body = "";
-      while (j < source.length && depth > 0) {
-        if (source[j] === "{") depth += 1;
-        else if (source[j] === "}") { depth -= 1; if (depth === 0) break; }
-        body += source[j]; j += 1;
-      }
-      order += 1;
-      out.push({ sels: prelude.split(",").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean), body, order, inMedia: stack.length > 0 });
-      i = j; continue;
-    }
-    if (ch === ";" && stack.length === 0) { buffer = ""; continue; }
-    if (ch === "}") { stack.pop(); buffer = ""; continue; }
-    buffer += ch;
-  }
-  return out;
-}
-const RULES = parseRules(css);
-
-function spec(sel: string): [number, number, number] {
-  let e = sel, prev = "";
-  while (prev !== e) { prev = e; e = e.replace(/:not\(([^)]*)\)/g, " $1 "); }
-  return [
-    (e.match(/#[\w-]+/g) ?? []).length,
-    (e.match(/\.[\w-]+/g) ?? []).length + (e.match(/\[[^\]]+\]/g) ?? []).length + (e.match(/:(?!not\()[\w-]+/g) ?? []).length,
-    (e.match(/(^|[\s>+~])([a-z][\w-]*)/g) ?? []).length,
-  ];
-}
+const RULES = parseCssRules(readDesktopStyles());
 const cmp = (a: number[], b: number[]) => { for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
 function effective(selector: string, prop: string): string | null {
   let best: { value: string; spec: number[]; order: number } | null = null;
   for (const rule of RULES) {
     if (rule.inMedia) continue;
-    for (const sel of rule.sels) {
+    for (const sel of rule.selectors) {
       if (sel !== selector) continue;
       const m = new RegExp("(?:^|;)\\s*" + prop + "\\s*:\\s*([^;]+)", "i").exec(rule.body);
       if (!m) continue;
@@ -92,10 +51,10 @@ describe("字号下限：规范 10.5px，全表不得低于", () => {
     const offenders: string[] = [];
     for (const rule of RULES) {
       const m = /font-size\s*:\s*([\d.]+)px/.exec(rule.body);
-      if (m && parseFloat(m[1]) < 10.5) offenders.push(rule.sels[0] + ": " + m[1] + "px");
+      if (m && parseFloat(m[1]) < 10.5) offenders.push(rule.selectors[0] + ": " + m[1] + "px");
       // font: 简写同样会设字号，实测这里曾藏了 9px
       const f = /font\s*:\s*([\d.]+)px\s/.exec(rule.body);
-      if (f && parseFloat(f[1]) < 10.5) offenders.push(rule.sels[0] + " (font 简写): " + f[1] + "px");
+      if (f && parseFloat(f[1]) < 10.5) offenders.push(rule.selectors[0] + " (font 简写): " + f[1] + "px");
     }
     expect(offenders, `低于 DESIGN.md §3.2「辅助信息 10.5px」的声明：\n${offenders.join("\n")}`).toEqual([]);
   });
@@ -133,7 +92,7 @@ describe("命令搜索：kbd 与状态列固定宽度", () => {
 
 describe("字体栈：Inter 未捆绑，实际用系统默认", () => {
   it("根字体栈包含系统回退（Segoe UI / Microsoft YaHei）", () => {
-    const root = RULES.filter(r => !r.inMedia && r.sels.includes(":root"))
+    const root = RULES.filter(r => !r.inMedia && r.selectors.includes(":root"))
       .map(r => /font-family\s*:\s*([^;]+)/.exec(r.body)?.[1]).filter(Boolean).join(" ");
     expect(root).toContain("Segoe UI");
     expect(root).toContain("Microsoft YaHei");
