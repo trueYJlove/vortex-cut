@@ -38,6 +38,7 @@
 |---|---|---|
 | Stage 0–8 / M2 | ✅ 已交付 | 基础编辑、B1 变速 / B2 转场 / B3 关键帧 / B4 字幕均已交付 |
 | M3 里程碑（预览引擎） | 部分交付 | M3-0 预览引擎、M3-2 播放重构已交付；M3-3 A1 混音代码与测试已交付（缺独立人工听测档案） |
+| **0.1.0 发布门（P237）** | **已立项（2026-11-28）** | 阶段 0 收口 → P235 R1–R3 → iPhone 素材兼容包；P236 为 0.2.0 主题，见 [`plans/P237`](plans/P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md) |
 | **时间线重构与工作区** | **进行中（当前主投入）** | OpenFilm 时间线对齐（P235）、全视觉轨合成收尾（P231）、Filmstrip 预抽（P232）与 P236 解耦/Agent 工作区已立项 |
 | **AI 能力线** | **进行中** | AI-1 多步会话、AI-2 CV 信号层、Wave 1 剪辑手法、W4.1 工作单与 W3.3 关键帧理解（opt-in）已合入 |
 | **W2.2 说话人层** | **降级长期态** | 精度门未过（S3），依据 [`ADR-0009`](adr/0009-w22-diarization-closeout.md) 以 `quality_status='unvalidated'` / `usable_for=['reference']` 交付 |
@@ -74,26 +75,27 @@
 
 | # | 主题 | 类型 | 状态摘要 | 详情 |
 |---|---|---|---|---|
+| P237 | 0.1.0 发布门与后续路线图 | 工作包 | ⏳ 2026-11-28 已立项，按阶段逐步执行 | [`P237 计划`](plans/P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md) / [`BACKLOG#p237`](BACKLOG.md#p237) |
 | P236 | 时间线数据解耦与 Agent 工作区 | 工作包 | ⏳ 2026-11-24 已立项，待规划门与切片拆解 | [`P236 方案`](plans/P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md) / [`BACKLOG#p236`](BACKLOG.md#p236) |
 | P235 | OpenFilm 时间线完整对齐 | 工作包 | 🟡 持续实现与验收中（固定参照 `b125a3d9`） | [`P235 计划`](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) / [`BACKLOG#p235`](BACKLOG.md#p235) |
 | P235-R1 | Replace 无音轨 video 与未知时长 | 风险对策 | 🟡 实现与证据未闭环 | [`BACKLOG#p235-r1`](BACKLOG.md#p235-r1) |
 | P235-R2 | >30s still 与 audio-only 解码成本 | 风险对策 | 🟡 复审通过，实现与计数证据未闭环 | [`BACKLOG#p235-r2`](BACKLOG.md#p235-r2) |
 | P235-R3 | 转场来源事实与最终布局投影 | 风险对策 | 🟡 架构已冻结，实现及测试未闭环 | [`BACKLOG#p235-r3`](BACKLOG.md#p235-r3) |
-| P235-R4 | HTML `page` 时间线功能与隔离渲染 | 风险对策 | 🟡 架构已冻结，实现与安全复核未闭环 | [`BACKLOG#p235-r4`](BACKLOG.md#p235-r4) |
+| P235-R4 | HTML `page` 时间线功能与隔离渲染 | 风险对策 | ⏸ 2026-11-28 用户裁决挂起：保留架构与 Schema 预留，移出 P235 验收（P237 D2） | [`BACKLOG#p235-r4`](BACKLOG.md#p235-r4) |
 | P231 | 全视觉轨画布盒模型重构 | 工作包 | 🟡 主体已落地，缺 A2 ffmpeg/IR 逐像素对拍补证 | [`BACKLOG#p231`](BACKLOG.md#p231) |
 | P232 | 素材级缩略图预抽（Filmstrip Sprite） | 工作包 | ⏳ 已实现并真机对齐，待全量门禁核销 | [`BACKLOG#p232`](BACKLOG.md#p232) |
 | P230 | 时间线/预览五项 OpenFilm 观察 | 工作包 | 🟡 ①②③⑤ 已落地，④ 已分立 P231 | [`BACKLOG#p230`](BACKLOG.md#p230) |
 | P227 | WebGPU 合成器与假硬解提示 | 工作包 | ⏳ 代码已合入（`VITE_AIVS_GPU=1` 门控），待真机矩阵核销 | [`BACKLOG#p227`](BACKLOG.md#p227) |
 | P196 | 42 份设计门遗留对账收口 | 工作包 | 🟡 5 项已落实，长时线项转 P200 | [`BACKLOG#p196`](BACKLOG.md#p196) |
 | P197 | B13-R `textureBytesOf` 记账口径 | 工作包 | 🟡 显式挂起（待 Chromium 上游修复或自建补丁） | [`BACKLOG#p197`](BACKLOG.md#p197) |
-| P200 | 长时线（~8m+）每 ~10s 冻结退化 | 缺陷修复 | 🟡 7 轮排查已排除 IPC/主线程假说，根因待定位 | [`BACKLOG#p200`](BACKLOG.md#p200) |
+| P200 | 长时线（~8m+）每 ~10s 冻结退化 | 缺陷修复 | 🟡 7 轮排查已排除 IPC/主线程假说，根因待定位；P237 并行线 B 限期 3 个工作日，未果则降级为已知边界 | [`BACKLOG#p200`](BACKLOG.md#p200) |
 | P203 | iPhone HDR（10-bit HLG HEVC）播放挂死 | 缺陷修复 | 🟡 已走软解兜底不挂死，缺代理就绪复测 | [`BACKLOG#p203`](BACKLOG.md#p203) |
 | P204 | 含 `elst` 偏移素材全帧 `no sample` | 缺陷修复 | 🟡 已修并通过 remux 验证，完整播放受 P203 关联 | [`BACKLOG#p204`](BACKLOG.md#p204) |
 | P206 | iPhone 竖拍（`rotation=-90`）呈现方向 | 缺陷修复 | 🟡 已防花屏，缺「适应」读 rotation 与铺满回归锁 | [`BACKLOG#p206`](BACKLOG.md#p206) |
 | P207 | 预览代理自动生成与切换边界 | 缺陷修复 | 🟡 主链路已交付，保留两项非阻塞边界 | [`BACKLOG#p207`](BACKLOG.md#p207) |
 | P216 | 解码探测写死合成 codec string | 缺陷修复 | 🟡 暂走坏帧降级兜底，待定探测改造路线 | [`BACKLOG#p216`](BACKLOG.md#p216) |
 | P187/P188 | 响度全片入口 / 预览淡入淡出 | 能力边界 | ⏳ 权威渲染已对齐，Interactive 淡入与全片入口待补 | [`BACKLOG#p187`](BACKLOG.md#p187) |
-| P161 | 中文 CLIP 模型分发与许可（W3.1） | 风险对策 | 🟡 无公网 https 托管点且许可 `upstream-undeclared` | [`BACKLOG#p161`](BACKLOG.md#p161) |
+| P161 | 中文 CLIP 模型分发与许可（W3.1） | 风险对策 | 🟡 2026-11-28 用户裁决：路线中暂按可用对待，许可核实与托管延后、不阻塞 0.1.0（P237 D1） | [`BACKLOG#p161`](BACKLOG.md#p161) |
 | P165 | W3.3 关键帧打标质量人工盲评 | 验收项 | 🟡 仅 9 帧非生产记录，未证质量达标 | [`BACKLOG#p165`](BACKLOG.md#p165) |
 | P181 | W3.3 探测路由 `project_id` 耦合 | 架构待办 | ⏳ 现行路由强依赖 `project_id` query 参数 | [`BACKLOG#p181`](BACKLOG.md#p181) |
 | P149 | W4.1 `roughcut`/`style` 步骤延后 | 工作包 | 🟡 已设 `WORKLIST_STEP_UNAVAILABLE` 守卫，暂不立项 | [`BACKLOG#p149`](BACKLOG.md#p149) |
@@ -103,7 +105,7 @@
 | P89/ADR0009 | W2.2 说话人语料限制与 W2.3 冻结 | 冻结项 | ❄️ W2.2 停在 D3，W2.3 冻结（解冻条件 U1–U3） | [`ADR-0009`](adr/0009-w22-diarization-closeout.md) / [`BACKLOG#p132`](BACKLOG.md#p132) |
 | P132 | W2.3 消费 turn 前须校验 `quality_status` | 验收项 | ⏳ 随未来 W2.3 立项门一并落地与测试 | [`BACKLOG#p132`](BACKLOG.md#p132) |
 | P217 | Graphite Precision 弹窗重构收尾 | 工作包 | 🟡 28 个弹窗已处理完毕，待最终整体核销 | [`BACKLOG#p217`](BACKLOG.md#p217) |
-| P220 | 旧 `--vc-*` 与 Graphite 令牌并存 | 技术债 | ⏳ 尚未开工，待全局视觉统一决策 | [`BACKLOG#p220`](BACKLOG.md#p220) |
+| P220 | 旧 `--vc-*` 与 Graphite 令牌并存 | 技术债 | ⏳ 已裁决（P237 D3）：Graphite `--dlg-primary` 单源，先别名后逐步替换 | [`BACKLOG#p220`](BACKLOG.md#p220) |
 | P192/P194 | E2E 选择器与剩余缺陷收口 | 工作包 | 🟡 主链已修，余 `stage4d` 网关/凭据与 `p33-seek-play` | [`BACKLOG#p194`](BACKLOG.md#p194) |
 | Wave1-L3 | Wave 1 剪辑手法真机听感签字 | 人工验收 | ⏳ 自动化已覆盖机器可判项，待人工听感确认 | [`BACKLOG#wave1-l3`](BACKLOG.md#wave1-l3) |
 | AI-Misc | 4K60 1.0s 差异 / `json_schema` 兼容 | 已知边界 | 🟡 4K60 远低于 10s 门；`script` 适配器为主通路 | [`BACKLOG#ai-misc`](BACKLOG.md#ai-misc) |

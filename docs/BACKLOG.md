@@ -7,6 +7,11 @@
 
 ## 1. 在研核心工作包（`plans/`）
 
+### P237 · 0.1.0 发布门与后续路线图 {#p237}
+- **类型 / 状态**：工作包｜⏳ **已立项（2026-11-28），按阶段逐步执行**
+- **出处**：[`plans/P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md`](plans/P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md)
+- **要点**：阶段 0 签字/补证收口 → 阶段 1 P235 R1–R3 → 并行 iPhone 素材兼容包与 P200 限期排查 → 0.1.0 发布门；P236 作为 0.2.0 主题（S0 TD-01 先行）。记录用户裁决 D1（P161 暂按可用）、D2（R4 挂起）、D3（P220 Graphite 单源）、D4（版本节奏）。
+
 ### P236 · 时间线数据解耦与 Agent 协作工作区 {#p236}
 - **类型 / 状态**：工作包｜⏳ **已立项（2026-11-24），待规划门与实施切片拆解**
 - **出处**：[`plans/P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md`](plans/P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md)
@@ -33,9 +38,9 @@
 - **要点**：active pair 供 Timeline、预览、RenderPlan/FFmpeg 与编辑校验共用，旧 `{after_clip_id, kind, duration}` 不得重新绑定到新后继；migration 45 仅从不可变历史修订/操作快照恢复原 incoming identity，不可恢复时保留 null/dormant。
 
 ### P235-R4 · OpenFilm HTML `page` 时间线功能与隔离渲染 {#p235-r4}
-- **类型 / 状态**：风险对策｜🟡 **架构已冻结，实现与安全复核未闭环**
+- **类型 / 状态**：风险对策｜⏸ **2026-11-28 用户裁决挂起（P237 D2）**
 - **出处**：[`plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) §2
-- **要点**：包含 `asset_kind=page` 安全源窗、`page_overrides[]` 校验与 Replace 清理、entrypoint 参与 cache hash；执行用户 HTML 前必须通过独立安全复核（sandbox、资源白名单、网络/导航边界、超时/取消与越权负例）；实时预览、authoritative preview 与 final export 共用同一页面帧源。
+- **要点**：包含 `asset_kind=page` 安全源窗、`page_overrides[]` 校验与 Replace 清理、entrypoint 参与 cache hash；执行用户 HTML 前必须通过独立安全复核（sandbox、资源白名单、网络/导航边界、超时/取消与越权负例）；实时预览、authoritative preview 与 final export 共用同一页面帧源。重启条件：P236 Agent 工作区落地且出现真实 Agent 生成动效需求后单独立项。
 
 ---
 
@@ -73,7 +78,7 @@
 ### P200 · 长时线合成预览退化（约 8 分钟以上每 ~10s 冻结 2–11s） {#p200}
 - **类型 / 状态**：缺陷修复｜🟡 **现象已实证、经 7 轮归因排查仍待定位根因与修复**
 - **出处**：`evidence/performance/P196_CROSSWINDOW_30MIN_MEASUREMENT_2026-10-27.md`、`evidence/performance/p200-window-attribution-20261028/`
-- **要点**：14.49 分钟长时线出现 `window_fetch` p50 2512.6ms / p95 8733.1ms 冻结尖峰；已排除 Core/IPC 慢、主线程长任务与 `reanchor → missingStuck` 假设，待进一步隔离触发状态量。
+- **要点**：14.49 分钟长时线出现 `window_fetch` p50 2512.6ms / p95 8733.1ms 冻结尖峰；已排除 Core/IPC 慢、主线程长任务与 `reanchor → missingStuck` 假设，待进一步隔离触发状态量。P237 并行线 B：限期 3 个工作日定位触发状态量，未果则降级为已知边界并写入规格与用户手册。
 
 ### P203 · iPhone HDR（10-bit HLG HEVC）素材播放挂死 {#p203}
 - **类型 / 状态**：缺陷修复｜🟡 **挂死已不复现（走 FFmpeg 软解兜底），但根因未修故未关闭**
@@ -110,7 +115,7 @@
 ## 3. AI 能力线、多机位与评测边界
 
 ### P161 · 中文语义模型分发与许可未闭环（W3.1 对最终用户阻塞） {#p161}
-- **类型 / 状态**：风险对策｜🟡 **`AIVS_MODEL_CDN` 通道已可配置，但无公网托管点导致装机用户仍不可用**
+- **类型 / 状态**：风险对策｜🟡 **`AIVS_MODEL_CDN` 通道已可配置，但无公网托管点导致装机用户仍不可用**（2026-11-28 用户裁决：路线规划中暂按可用对待，许可核实与托管延后，不阻塞 0.1.0，见 P237 D1）
 - **出处**：[`specs/local-intelligence.md`](specs/local-intelligence.md) §2 / `resources/model-manifests/chinese-clip-vit-base-patch16.json`
 - **要点**：fp32 中文双塔 719 MB 仅放行 `https://` 与本机 `file://`，`download_url: null` 暂存于私有备援；上游许可为 `upstream-undeclared`，对外分发前需确认许可或更换替代模型并重跑评测。
 
@@ -161,9 +166,9 @@
 - **出处**：[`specs/desktop-ui.md`](specs/desktop-ui.md) §2 / `evidence/2026-11-09-dialog-family-c/`
 
 ### P220 · 旧 `--vc-*` 令牌与 Graphite `--dlg-primary` 并存技术债 {#p220}
-- **类型 / 状态**：技术债｜⏳ **尚未开工**
+- **类型 / 状态**：技术债｜⏳ **已裁决（P237 D3），待实施**
 - **出处**：`apps/desktop/src/styles.css`（`--vc-accent: #25d3ac` 约 29 处引用 vs `--dlg-primary: #35d6ae`）
-- **要点**：影响全局时间线/面板/工具栏视觉，需先作产品级色彩统一决策后再立独立迁移任务。
+- **要点**：影响全局时间线/面板/工具栏视觉；已裁决以 `--dlg-primary` 为单源：先 `--vc-accent: var(--dlg-primary)` 别名，再逐步替换，最后删旧令牌。
 
 ### P192 / P194 · E2E 共享选择器与剩余缺陷地图 {#p194}
 - **类型 / 状态**：工作包｜🟡 **族1/族2/族4 与 stage2a/stage2b/m5-timeline/p33-eof-replay 已修或定性，仍余少量待办**

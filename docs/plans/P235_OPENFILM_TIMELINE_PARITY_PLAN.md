@@ -1,5 +1,7 @@
 # P235 OpenFilm 时间线完整对照计划
 
+> **2026-11-28 范围调整**：R4（HTML `page`）按用户裁决挂起，移出本计划验收范围，见 [P237 D2](P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md)。
+
 项目状态只见 [`docs/STATUS.md`](../STATUS.md)。P235 接续 P234 的未完成目标；P234 的定向验证与滚轮结果仅作历史证据，不代表时间线整体对齐。OpenFilm 对照版本固定为本地 checkout commit `b125a3d9`。
 
 ## 目标与设计决策

@@ -6,5 +6,6 @@
 
 | 工作包 | 文档 | 状态 |
 |---|---|---|
+| **P237** | [P237 0.1.0 发布门与后续路线图](P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md) | 已立项，按步骤逐步执行（阶段 0 起） |
 | **P236** | [P236 时间线数据解耦与 Agent 协作工作区架构方案](P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md) | 已立项，待拆解规划门与实施切片 |
 | **P235** | [P235 OpenFilm 时间线视觉/交互/功能/性能完整对齐计划](P235_OPENFILM_TIMELINE_PARITY_PLAN.md) | 持续实现与对照验收中 |
