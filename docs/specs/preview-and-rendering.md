@@ -32,6 +32,7 @@
   - `contracts` `isTimelineClip` 放宽为校验 `track_id` 存在于 `tracks` 且 `kind` 与 `asset_kind` 兼容，移除图片仅 `"V1"` 限定（不改 `PROTOCOL_VERSION`）。
   - 冻结裁决 Q1–Q5：「适应」比例取最上层视觉轨首片段；copy/cut/paste 快照扩展至全视觉轨；`changePreviewRatio` 批量改全视觉轨 `blurred_background` 为 `crop_fill`；保留 `V1` 行高 `MAIN_TRACK_H`；转场不跨轨。
   - 隐藏视觉轨：不入帧 `layers`，保留时间线尾长，隐藏段不触发整条预览回退。
+  - **权威端统一盒护栏（A2/A4/A5 对齐）**：基底轨（最下层视觉轨；缺 `track_index` 时回退 `V1`）短于上层视觉轨终点时以黑底画布承接 `[vcat]`（并按需延长 `[acat]`）避免上层截断；带 `mask`/`keying` 或内容盒 `transform` 的基底段在基底槽输出黑帧、仅在 `_pip_overlay_chain` 单绘一次（杜绝双绘重影与蒙版/抠像失效）；`_pip_overlay_chain` 与 IR `_layer_entry` 同式消费静态 `transform.opacity` 与 `keyframes`（`position` / `rotate` / `opacity`）；A2 逐像素对拍由 `services/core/tests/integration/test_p231_a2_pixel_parity_real.py` 锁定（`dx=0, dy=0`、PSNR 与盒边界验证）。
 
 ### 1.3 验收标准（A1–A11）
 

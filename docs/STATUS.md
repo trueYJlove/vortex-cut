@@ -39,7 +39,7 @@
 | Stage 0–8 / M2 | ✅ 已交付 | 基础编辑、B1 变速 / B2 转场 / B3 关键帧 / B4 字幕均已交付 |
 | M3 里程碑（预览引擎） | 部分交付 | M3-0 预览引擎、M3-2 播放重构已交付；M3-3 A1 混音代码与测试已交付（缺独立人工听测档案） |
 | **0.1.0 发布门（P237）** | **已立项（2026-11-28）** | 阶段 0 收口 → P235 R1–R3 → iPhone 素材兼容包；P236 为 0.2.0 主题，见 [`plans/P237`](plans/P237_RELEASE_0_1_0_AND_ROADMAP_PLAN.md) |
-| **时间线重构与工作区** | **进行中（当前主投入）** | OpenFilm 时间线对齐（P235）、全视觉轨合成收尾（P231）与 P236 解耦/Agent 工作区已立项 |
+| **时间线重构与工作区** | **进行中（当前主投入）** | OpenFilm 时间线对齐（P235）与 P236 解耦/Agent 工作区已立项 |
 | **AI 能力线** | **进行中** | AI-1 多步会话、AI-2 CV 信号层、Wave 1 剪辑手法、W4.1 工作单与 W3.3 关键帧理解（opt-in）已合入 |
 | **W2.2 说话人层** | **降级长期态** | 精度门未过（S3），依据 [`ADR-0009`](adr/0009-w22-diarization-closeout.md) 以 `quality_status='unvalidated'` / `usable_for=['reference']` 交付 |
 | **W2.3 机位切换** | **❄️ 冻结** | 依赖 W2.2 轮次且准入未满足，按 [`ADR-0009`](adr/0009-w22-diarization-closeout.md) D1 冻结（解冻条件 U1–U3） |
@@ -82,7 +82,6 @@
 | P235-R2 | >30s still 与 audio-only 解码成本 | 风险对策 | 🟡 复审通过，实现与计数证据未闭环 | [`BACKLOG#p235-r2`](BACKLOG.md#p235-r2) |
 | P235-R3 | 转场来源事实与最终布局投影 | 风险对策 | 🟡 架构已冻结，实现及测试未闭环 | [`BACKLOG#p235-r3`](BACKLOG.md#p235-r3) |
 | P235-R4 | HTML `page` 时间线功能与隔离渲染 | 风险对策 | ⏸ 2026-11-28 用户裁决挂起：保留架构与 Schema 预留，移出 P235 验收（P237 D2） | [`BACKLOG#p235-r4`](BACKLOG.md#p235-r4) |
-| P231 | 全视觉轨画布盒模型重构 | 工作包 | 🟡 主体已落地，缺 A2 ffmpeg/IR 逐像素对拍补证 | [`BACKLOG#p231`](BACKLOG.md#p231) |
 | P227 | WebGPU 合成器与假硬解提示 | 工作包 | ⏳ 代码已合入（`VITE_AIVS_GPU=1` 门控），待真机矩阵核销 | [`BACKLOG#p227`](BACKLOG.md#p227) |
 | P196 | 42 份设计门遗留对账收口 | 工作包 | 🟡 5 项已落实，长时线项转 P200 | [`BACKLOG#p196`](BACKLOG.md#p196) |
 | P197 | B13-R `textureBytesOf` 记账口径 | 工作包 | 🟡 显式挂起（待 Chromium 上游修复或自建补丁） | [`BACKLOG#p197`](BACKLOG.md#p197) |

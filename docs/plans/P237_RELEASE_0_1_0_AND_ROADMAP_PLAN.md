@@ -19,7 +19,7 @@
 - [x] **0.1 P232** Filmstrip 预抽：跑全量门禁（`pnpm run ci`），通过后按 Rule 7 核销（结论已在 `specs/preview-and-rendering.md` §3，核对后移除 §4/BACKLOG 行）。（2026-11-28 已核销：`pnpm run ci` 全绿；同时以 best-of-3 p95 稳定了拖动规划挂钟断言）
 - [x] **0.2 P217** Graphite 弹窗：整体核销确认（28 个弹窗证据见 `evidence/2026-11-09-dialog-family-c/`），结论并入 `specs/desktop-ui.md` §2 后移除。（2026-11-28 已核销：28 个已登记弹窗 11 份守卫测试全绿，长期结论已并入 specs/desktop-ui.md §2）
 - [x] **0.3 P230** 五项观察：①②③⑤ 已落地，④ 由 P231、预抽由 P232 接续 → 直接核销。（2026-11-28 已核销：①②③⑤ 长期结论并入 specs/timeline-and-editing.md §1.3，④ 由 P231 承接、预抽由已核销的 P232 闭环）
-- [ ] **0.4 P231** 补 A2 `ffmpeg`/IR 逐像素对拍证据，达标后核销。
+- [x] **0.4 P231** 补 A2 `ffmpeg`/IR 逐像素对拍证据，达标后核销。（2026-11-28 已核销：修复 ffmpeg.py 4 处多轨/盒模型缺陷，test_p231_a2_pixel_parity_real.py + 真媒体回归 + pnpm run ci 全绿）
 - [ ] **0.5 P206** 补 `App.tsx` `assetOriginalRatio` 在“适应”模式读取 `rotation` + 竖拍铺满画布回归锁测试，完成后核销。
 - [ ] **0.6 P220** 按 D3 写入别名 `--vc-accent: var(--dlg-primary)`（第一步），后续替换随日常改动推进；别名落地后 P220 行改为“迁移中”。
 - [ ] **0.7 Wave1-L3**（需人工）：用户真机听感/审美签字。

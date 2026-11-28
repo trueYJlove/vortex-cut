@@ -46,11 +46,6 @@
 
 ## 2. 预览引擎、渲染与解码缺陷
 
-### P231 · 预览画布模型重构（黑色公共背景 + 全视觉轨自由排版） {#p231}
-- **类型 / 状态**：工作包｜🟡 **S1–S7、画布比例语义再裁决与隐藏视觉轨不入帧已落地，缺 A2 逐像素对拍独立补证**
-- **出处**：[`specs/preview-and-rendering.md`](specs/preview-and-rendering.md) §1
-- **要点**：全视觉轨 `layers`、同轨转场与 `IR_PROJECTOR_VERSION=7` 已交付，A1/A3/A6/A7/A10 与隐藏轨真机 E2E 通过；仅余 A2 `ffmpeg`/IR 逐像素对拍补证。
-
 ### P227 · 预览丝滑收口（WebGPU 零拷贝合成器 + 软解推断提示） {#p227}
 - **类型 / 状态**：工作包｜⏳ **代码已合入（默认 WebGL2，`VITE_AIVS_GPU=1` 门控），待真机矩阵核销**
 - **出处**：[`specs/preview-and-rendering.md`](specs/preview-and-rendering.md) §4.1
