@@ -21,7 +21,7 @@
 - [x] **0.3 P230** 五项观察：①②③⑤ 已落地，④ 由 P231、预抽由 P232 接续 → 直接核销。（2026-11-28 已核销：①②③⑤ 长期结论并入 specs/timeline-and-editing.md §1.3，④ 由 P231 承接、预抽由已核销的 P232 闭环）
 - [x] **0.4 P231** 补 A2 `ffmpeg`/IR 逐像素对拍证据，达标后核销。（2026-11-28 已核销：修复 ffmpeg.py 4 处多轨/盒模型缺陷，test_p231_a2_pixel_parity_real.py + 真媒体回归 + pnpm run ci 全绿）
 - [x] **0.5 P206** 补 `App.tsx` `assetOriginalRatio` 在“适应”模式读取 `rotation` + 竖拍铺满画布回归锁测试，完成后核销。（2026-11-28 已核销：原「适应」assetOriginalRatio 已由 2026-11-18 画布比例真源裁决取代；补修 ffmpeg.py _pip_overlay_chain 旋转换轴并补全 IR/FFmpeg 真渲染/Desktop texSwap 竖拍铺满回归锁，同时在 setup.ts 同步 asyncUtilTimeout 至 5s，pnpm run ci 全绿）
-- [ ] **0.6 P220** 按 D3 写入别名 `--vc-accent: var(--dlg-primary)`（第一步），后续替换随日常改动推进；别名落地后 P220 行改为“迁移中”。
+- [x] **0.6 P220** 按 D3 写入别名 `--vc-accent: var(--dlg-primary)`（第一步），后续替换随日常改动推进；别名落地后 P220 行改为“迁移中”。（2026-11-28 已完成第一步：`01-shell-and-timeline.css` 改为 `--vc-accent: var(--dlg-primary)`、移除 `08-workspace-studio-and-theme.css` 浅色重复字面量、新增 `theme-token-coverage.test.ts` 单源守卫，`STATUS.md` / `BACKLOG.md` 已更新为「迁移中」，`pnpm run ci` 全绿）
 - [ ] **0.7 Wave1-L3**（需人工）：用户真机听感/审美签字。
 - [ ] **0.8 P227**（需人工真机）：4K 对照、`VITE_AIVS_GPU=1` 回退无黑屏、假硬解提示验证。
 

@@ -143,9 +143,9 @@
 ## 4. 桌面 UI、E2E 与手工验收欠账
 
 ### P220 · 旧 `--vc-*` 令牌与 Graphite `--dlg-primary` 并存技术债 {#p220}
-- **类型 / 状态**：技术债｜⏳ **已裁决（P237 D3），待实施**
-- **出处**：`apps/desktop/src/styles.css`（`--vc-accent: #25d3ac` 约 29 处引用 vs `--dlg-primary: #35d6ae`）
-- **要点**：影响全局时间线/面板/工具栏视觉；已裁决以 `--dlg-primary` 为单源：先 `--vc-accent: var(--dlg-primary)` 别名，再逐步替换，最后删旧令牌。
+- **类型 / 状态**：技术债｜🟡 **迁移中（P237 D3：已完成 `--vc-accent: var(--dlg-primary)` 单源别名，待逐步替换存量引用并删旧令牌）**
+- **出处**：`apps/desktop/src/styles/01-shell-and-timeline.css` / `08-workspace-studio-and-theme.css`（当前 43 处 `var(--vc-accent` 存量引用）
+- **要点**：`--vc-accent` 已在 `:root` 别名指向 `var(--dlg-primary)` 并移除 `[data-theme="light"]` 重复字面量定义，由 `theme-token-coverage.test.ts` 锁定单源；后续随日常改动逐步将 43 处 `var(--vc-accent` 替换为 `var(--dlg-primary)`，清零后删除 `--vc-accent` 定义并核销本条目。
 
 ### P192 / P194 · E2E 共享选择器与剩余缺陷地图 {#p194}
 - **类型 / 状态**：工作包｜🟡 **族1/族2/族4 与 stage2a/stage2b/m5-timeline/p33-eof-replay 已修或定性，仍余少量待办**

@@ -63,7 +63,7 @@
 - 文字与边线：`--d-text: #edf1ef`、`--d-text-2: #b5bfbc`、`--d-muted: #85918e`、`--d-faint: #64716e`、`--d-line: rgba(255,255,255,.075)`、`--d-edge: rgba(255,255,255,.12)`。
 - 强调与状态：`--accent: #35d6ae`（`--accent-hover: #59e1bf`、`--accent-ink: #07251e`、`--accent-dim: rgba(53,214,174,.11)`）、`--danger: #e35d62`、`--warning: #d8b06a`。
 - 危险语义细分令牌（深/浅双主题定义，禁止在 `.modal` 内硬编码多套红色）：`--dlg-danger-text`（`#f0a1a5`）、`--dlg-danger-text-soft`（`#edb9bb`）、`--dlg-danger-strong`（`#e88b8f`）、`--dlg-danger-muted`（`#f0b9b2`）、`--dlg-danger-warm`（`#f2b8b5`）、`--dlg-danger-calm`（`#d9b4b4`）与 `--dlg-danger-hover` / `--dlg-danger-ink` / `--dlg-danger-deep`。
-- 旧 `--vc-*` 令牌与 `--dlg-primary` 合并决策跟踪于 [`../BACKLOG.md`](../BACKLOG.md#p220)。
+- 强调色单源约束：旧 `--vc-accent` 已收敛为 `var(--dlg-primary)` 别名（深浅双主题统一由 `--dlg-primary` 驱动，由 `theme-token-coverage.test.ts` 守卫）；存量引用迁移跟踪见 [`../BACKLOG.md`](../BACKLOG.md#p220)。
 
 ### 2.3 字体与控件档位（由 `spec-tier-closure.test.ts` 自动化锁定）
 
