@@ -162,3 +162,10 @@ A1  音频轨（audio）                   ┘
 - **B. 卡点（`beat_sync`）**：未分析显示「分析节拍」按钮 → 轮询就绪（BPM / 拍数）→ 干跑采纳后切点落节拍（听感对拍）；无音轨显示「无法检出节拍」且可重试；素材变更显示需重分析。
 - **C. L/J Cut（`lj_cut`）**：已转录显示「ASR 词级转录 ✓」；未转录引导先转录；自动/手动 J（提前 300–500ms 入声）/L（延后）预览听感正确。
 - **D. 通用**：外部修改时间线触发基线漂移提示并禁用采纳；已采纳提案不可重复采纳；全程零 egress。
+
+---
+
+## 6. 媒体替换无音轨与未知时长边界（P235-R1）
+
+- **无音轨视频替换音频目标（`replace_clip_source`）**：音频轨接收 `audio` 或任意 `video` 素材（不要求存在源音轨）；无音轨视频仍保留音频 Clip 语义（`asset_kind="audio"`、`audio.enabled=true`，允许 `set_audio` 调节增益/淡变与 `trim_clip` / `set_speed` / `undo`），`RenderPlanCompiler` 与终态校验器放行，`FFmpeg` 以 `anullsrc` 产出等长静音；Desktop `TimelineCanvas` 对 `has_audio === false` 跳过波形请求并显示空带，`PreviewSession` 跳过音频 Rig 创建及 PCM 分块流式请求。
+- **未知有限时长与真实提前 EOF**：源 `media_info.duration_us` 缺失或 `0` 时，`replace_clip_source`、`trim_clip`、`set_clip_source_window` 与终态文档校验均以 `[0, round_half_up(target_duration × speed)]` 暂定源区间（受 `100ms` 下限与 `MAX_IMAGE_US` 上限约束）；Desktop 拖入替换预览（`resolveTimelineAssetDropIntent` `zone="center"`）将虚线框对齐目标起点并使用目标/截短时长。权威渲染/导出（`ffmpeg.py`）对未知或短于源窗口的视频以 `tpad` 补黑、起点已越过真实 EOF 时走全黑/静音占位，保证成片满足 `validate_rendered_media`（`±83ms`）；实时预览（`PreviewSession`）在 `±1` 邻帧兜底后仍缺帧时抛出统一 `SOURCE_EOF:` 边界反馈而不误降级解码后端。
