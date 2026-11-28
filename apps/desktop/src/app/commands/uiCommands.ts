@@ -177,7 +177,7 @@ export const uiCommands: readonly CommandDefinition<Record<string, never>, { tri
     mcpExpose: false,
     inputSchema: emptySchema,
     execute(ctx) {
-      ctx.showNotice("请查看 docs/requirements/VORTEX_CUT_USER_MANUAL.md", "info");
+      ctx.showNotice("请查看 docs/guides/user-manual.md", "info");
       return { ok: true, command: "help.manual", data: { triggered: true } };
     },
   },

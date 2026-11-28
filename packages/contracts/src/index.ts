@@ -797,7 +797,7 @@ export interface TimelineClip {
   /** W0.3 可选字段：声画链接组。缺省无链接（旧语义）；不写 null。 */
   link_group_id?: string;
 }
-/** B4：字幕样式覆盖（部分字段，渲染时与预设合并；见 docs/design/CAPTIONS_RENDERING_DESIGN.md §1.1）。 */
+/** B4：字幕样式覆盖（部分字段，渲染时与预设合并；见 docs/specs/timeline-and-editing.md §4.1）。 */
 export interface CaptionStyleOverride {
   /** 字体名称（仅内置字体有效，缺省跟随预设）。 */
   font_name?: string;
@@ -884,7 +884,7 @@ export interface TimelineTransition {
   duration_us: number;
 }
 
-/** B3 关键帧属性种类与数值范围（见 docs/design/KEYFRAMES_DESIGN.md §1）。 */
+/** B3 关键帧属性种类与数值范围（见 docs/specs/timeline-and-editing.md §3.1）。 */
 export const KEYFRAME_PROPERTIES = ["position", "scale", "rotate", "opacity"] as const;
 export type KeyframeProperty = (typeof KEYFRAME_PROPERTIES)[number];
 /** 关键帧：t_us 为片段内时间线时间；position 含 x/y 比率，其余含标量 v。 */

@@ -5,12 +5,12 @@
 收敛到本模块单点，Renderer 端只做应用（架构决策 R4，M3-0 实证）。
 
 - 白名单硬失败：子集外语义抛 PREVIEW_IR_UNSUPPORTED（R11），
-  子集定义见 docs/archive/STAGE_M3_0_IR_CONTRACT_DRAFT.md（v0.2）；
+  子集定义见 docs/specs/preview-and-rendering.md §2；
 - 输出时长 = 转场借用压缩后的输出时间轴（≠ 时间线最大终点）；
 - 纯函数、无 IO：同输入必得同 IR（独立验收已复核逐位一致）。
 
-毕业来源：M3-0 探针 tools/m3_0/ir_projector.py（语义零改动，见
-docs/design/records/STAGE_M3_0_TECH_VALIDATION_REPORT.md）。
+毕业来源：M3-0 探针 tools/m3_0/ir_projector.py（语义零改动，见 Git 历史
+`STAGE_M3_0_TECH_VALIDATION_REPORT.md`）。
 """
 from __future__ import annotations
 

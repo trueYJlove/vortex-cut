@@ -263,7 +263,7 @@ def build_timeline_args(
     # C23 结项护栏：reverse 滤镜在单段全部解码帧驻留内存（实测 60s 1080p
     # ≈ 4.9GiB——FFmpeg 滤镜缓存未压缩帧）。超出预算的倒放段显式失败
     # （RENDER_REVERSE_TOO_LONG），不伪装成可完成的长任务；分块倒放
-    # （C23 实验项）未实施,见 docs/archive/PERFORMANCE_G3_CLOSEOUT_2026-09-10.md。
+    # （C23 实验项）未实施，见 docs/specs/preview-and-rendering.md §4.2。
     for segment in segments:
         if (
             segment["asset_kind"] == "video"

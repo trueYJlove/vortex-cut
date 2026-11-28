@@ -1,6 +1,6 @@
 """A07：媒体探测结果缓存（ffprobe 调用的去重层）。
 
-设计约束（docs/archive/PERFORMANCE_IMPLEMENTATION_PLAN_2026-09-08.md 第 5 节 A07）：
+设计约束（docs/specs/preview-and-rendering.md §4.2 A07）：
 - cache key = asset fingerprint + stat(size, mtime_ns) + ffprobe build——
   文件变化立即失效（key 不同即未命中），不含绝对路径等短期信息。
 - 成功缓存条目 ≤256（近似 LRU：命中重插队尾）；失败缓存短暂（默认 5 秒），

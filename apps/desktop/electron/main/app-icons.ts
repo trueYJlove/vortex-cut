@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { app } from "electron";
 
 /**
- * 品牌图标解析（资产清单见 docs/design/BRANDING_ASSETS.md）：
+ * 品牌图标解析（资产清单见 docs/guides/branding.md）：
  * - 打包后：src/renderer/public/icons 随 files:["out"] 构建进 out/renderer/icons，
  *   再进入 asar，主进程用 __dirname 相对路径读取；
  * - 开发态：electron-vite 只把 main/preload 写入 out，图标从源码 public 目录取。

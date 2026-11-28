@@ -2,7 +2,7 @@
  * WebGL2 上下文与全部 GL 状态（环形/影子纹理、字幕层、模糊垫底 FBO），执行
  * 主线程会话下发的绘制命令列表（upload/compose/resize/readback）。
  *
- * 动机（实测数据见 docs/design/records/PHASE2_HANDOFF.md）：compose p95 0.4ms 非瓶颈，
+ * 动机：compose p95 0.4ms 非瓶颈，
  * upload（copyTo + texImage2D + mipmap）p95 14~25ms 在主线程是拖帧元凶——
  * 迁入 worker 后与解码抖动物理隔离，主线程只剩编排与 React。
  *

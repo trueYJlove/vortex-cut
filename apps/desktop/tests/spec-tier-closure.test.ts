@@ -24,7 +24,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readDesktopStyles().replace(/\/\*[\s\S]*?\*\//g, "");
-const design = readFileSync(resolve(root, "../../docs/design/ui-mockups/dialog-system-v2/DESIGN.md"), "utf8");
+const design = readFileSync(resolve(root, "../../docs/specs/desktop-ui.md"), "utf8");
 
 type Rule = { sels: string[]; body: string; inMedia: boolean };
 function parseRules(source: string): Rule[] {

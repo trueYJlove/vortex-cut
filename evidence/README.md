@@ -7,7 +7,7 @@
 
 - 新实验按日期命名：`YYYY-MM-DD-<topic>/`，目录内至少包含 `README.md` 或成对的 `PRE_REGISTRATION.md` + `RESULT.md`（先写预登记、后落结果）。
 - **只留结论与轻量摘要进 Git**：Git 仅保留文本说明与轻量配置/摘要 JSON（`< 200 KB` 级）；截图（`.png`）、媒体文件（`.mp4/.mkv`）、大日志（`.log`）、逐帧 trace（`.jsonl`）及兆级采样输出由 [`.gitignore`](../.gitignore) 排除，本地用完可随时清理。
-- 性能采样归入 `performance/`；早期专题目录（如 `m3_0/`、`cv_sampling/`、`quality_eval/`）按原路径保留以维持引用稳定；清理任何目录前先核对 `docs/STATUS.md` 与 `docs/design/adr/` 引用。
+- 性能采样归入 `performance/`；早期专题目录（如 `m3_0/`、`cv_sampling/`、`quality_eval/`）按原路径保留以维持引用稳定；清理任何目录前先核对 `docs/STATUS.md` 与 `docs/adr/` 引用。
 
 ## 主要证据族导航
 

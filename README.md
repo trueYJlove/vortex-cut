@@ -22,7 +22,7 @@ Vortex Cut 是 Vortex 旗下的本地优先、AI 驱动的视频剪辑与多平�
 - [文档总入口](docs/README.md)：按专题查找需求、设计与研究材料。
 - [项目状态源 (`docs/STATUS.md`)](docs/STATUS.md)：唯一声明当前阶段、能力边界与未闭环承诺。
 - [系统架构](ARCHITECTURE.md)：进程边界、核心模块、数据模型与真实代码分层。
-- [用户使用手册](docs/requirements/VORTEX_CUT_USER_MANUAL.md)：编辑器操作说明。
+- [用户使用手册](docs/guides/user-manual.md)：编辑器操作说明。
 - [工程纪律与文档同步规范](AGENTS.md)：权威文档分工、代码→文档映射、执行门禁与文档同步规则。
 
 ## 本地架构
@@ -70,4 +70,4 @@ pnpm package:verify:real
 
 ## 品牌与安装身份
 
-品牌基线、兼容标识和本次不迁移旧开发安装数据的边界见 [docs/requirements/BRAND_BASELINE.md](docs/requirements/BRAND_BASELINE.md)。当前工作树的 Windows Builder 配置已使用新安装身份 `io.github.trueyjlove.vortexcut`、产品名 `Vortex Cut` 和产物名 `VortexCut-Setup-${version}-x64.exe`。真实 Windows 包的交付与验收状态统一见 [docs/STATUS.md](docs/STATUS.md)。
+品牌基线、兼容标识和本次不迁移旧开发安装数据的边界见 [docs/guides/branding.md](docs/guides/branding.md)。当前工作树的 Windows Builder 配置已使用新安装身份 `io.github.trueyjlove.vortexcut`、产品名 `Vortex Cut` 和产物名 `VortexCut-Setup-${version}-x64.exe`。真实 Windows 包的交付与验收状态统一见 [docs/STATUS.md](docs/STATUS.md)。

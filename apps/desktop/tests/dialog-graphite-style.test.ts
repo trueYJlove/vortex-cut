@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readDesktopStyles } from "./helpers/read-styles.js";
 
 /**
- * Graphite Precision 对话框层回归（docs/design/ui-mockups/dialog-system-v2）。
+ * Graphite Precision 对话框层回归（apps/desktop/tests/fixtures/dialog-system-v2）。
  *
- * 契约：DESIGN.md 第 34-126、146-154 行 + index.html 第 7-131 行参考 CSS。
+ * 契约：docs/specs/desktop-ui.md §2 + index.html 参考 CSS。
  * 本测试与本仓既有 CSS 测试同法——直接对 styles.css 做**级联裁决**，
  * 而不是断言"某段文本存在"：文本存在但被更高特异性规则压掉，正是这类
  * 视觉收口最初的失效方式（dialog-box-indent / transcript-segment-layout

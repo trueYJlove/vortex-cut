@@ -3,7 +3,7 @@
 > **角色**：LiuWei（架构师）联合 ZhangSan（Core/数据模型）、YeJing（契约/Desktop）、LiuKeAi（独立评审）口径对齐  
 > **状态**：已立项（2026-11-24 用户确认立项，待拆解规划门与实施切片；当前项目实际状态与能力边界只见 [`docs/STATUS.md`](../STATUS.md)）  
 > **日期**：2026-11-24  
-> **关联基线**：[`ARCHITECTURE.md`](../../ARCHITECTURE.md)、[`ADR-0002`](../design/adr/0002-architecture-review-structure-debt.md)、[`ADR-0003`](../design/adr/0003-ai-direction-and-privacy-hard-commitment.md)、[`ADR-0004`](../design/adr/0004-ai-capability-master-plan-decisions.md)、[`P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](P235_OPENFILM_TIMELINE_PARITY_PLAN.md)
+> **关联基线**：[`ARCHITECTURE.md`](../../ARCHITECTURE.md)、[`ADR-0002`](../adr/0002-architecture-review-structure-debt.md)、[`ADR-0003`](../adr/0003-ai-direction-and-privacy-hard-commitment.md)、[`ADR-0004`](../adr/0004-ai-capability-master-plan-decisions.md)、[`P235_OPENFILM_TIMELINE_PARITY_PLAN.md`](P235_OPENFILM_TIMELINE_PARITY_PLAN.md)
 
 ---
 

@@ -9,13 +9,13 @@ Core 全量回归是本仓库既有的强制回归门；治理检查必须挂在
 1. **事实块一致性**：`docs/STATUS.md` §1 的机器可读块必须等于代码实际值。
    新增/修改迁移、白名单 op、CV 算法版本、协议版本时若不同步更新 STATUS.md，本测试红。
 2. **过期表述黑名单**：非历史文档不得重新引入已知过期表述。
-   "历史文档"由 `docs/STATUS.md` §6 的表格声明——把某文档列入 §6 即自动豁免黑名单，
+   "历史点时间证据"由 `docs/STATUS.md` §5 的表格声明——把某记录列入 §5 即自动豁免黑名单，
    因此豁免集是自维护的，不需要在本文件里手工维护列表。
 3. **正文数值复述一致性**：STATUS.md 正文散文里写死的数字（如"算法版本 3"、
    "23 种显式冻结"）也必须等于 §1 事实块。§1 只覆盖结构化声明，正文复述是 2026-09-24
    至 2026-10-09 之间静默存活的一处盲区——本测试把它一并纳入机器校验。
 
-维护方式见 `docs/STATUS.md` §7。
+维护方式见 `docs/STATUS.md` §6。
 """
 from __future__ import annotations
 
@@ -80,11 +80,11 @@ def _status_facts() -> dict:
 
 
 def _historical_docs() -> set[Path]:
-    """STATUS.md §6 表格第一列声明的历史文档（自动豁免黑名单）。"""
+    """STATUS.md §5 表格第一列声明的历史点时间证据（自动豁免黑名单）。"""
     text = _status_text()
-    marker = "## 6."
-    assert marker in text, "STATUS.md 缺少 §6 历史状态文档索引"
-    section = text.split(marker, 1)[1].split("## 7.", 1)[0]
+    marker = "## 5."
+    assert marker in text, "STATUS.md 缺少 §5 历史点时间证据索引"
+    section = text.split(marker, 1)[1].split("## 6.", 1)[0]
     paths: set[Path] = set()
     for line in section.splitlines():
         match = re.match(r"^\|\s*`([^`]+\.md)`\s*\|", line.strip())
@@ -95,16 +95,11 @@ def _historical_docs() -> set[Path]:
 
 def _live_markdown() -> list[Path]:
     excluded = _historical_docs() | {STATUS_DOC.resolve()}
-    archive_root = (REPO / "docs/archive").resolve()
     found: dict[Path, None] = {}
     for pattern in _SCAN_GLOBS:
         for path in REPO.glob(pattern):
             resolved = path.resolve()
-            if (
-                resolved in excluded
-                or archive_root in resolved.parents
-                or not path.is_file()
-            ):
+            if resolved in excluded or not path.is_file():
                 continue
             found[resolved] = None
     return sorted(found)
@@ -246,48 +241,49 @@ def test_no_stale_status_claims_in_live_docs() -> None:
         "非历史文档中以断言形式出现已知过期表述。三选一：\n"
         "  ① 修正该表述，改为引用 docs/STATUS.md；\n"
         "  ② 若是在记录勘误/历史教训，在该行加上修正语境标记（如「曾」「已修正」「~~」）；\n"
-        "  ③ 若该文档确为点时间记录，登记到 docs/STATUS.md §6 获得豁免。\n"
+        "  ③ 若该文档确为点时间记录，登记到 docs/STATUS.md §5 获得豁免。\n"
         + "\n".join(offenders)
     )
 
 
 def test_historical_docs_actually_exist() -> None:
-    """§6 登记的路径必须真实存在——防止登记名写错导致豁免静默失效。"""
+    """§5 登记的路径必须真实存在——防止登记名写错导致豁免静默失效。"""
     missing = [
         str(path.relative_to(REPO))
         for path in sorted(_historical_docs())
         if not path.is_file()
     ]
-    assert not missing, f"STATUS.md §6 登记了不存在的文档：{missing}"
+    assert not missing, f"STATUS.md §5 登记了不存在的文档：{missing}"
 
 
-@pytest.mark.parametrize("anchor", ["## 1.", "## 4.", "## 6.", "## 7."])
+@pytest.mark.parametrize("anchor", ["## 1.", "## 4.", "## 5.", "## 6."])
 def test_status_doc_keeps_required_sections(anchor: str) -> None:
     """状态源的结构本身也是契约——缺节会让纪律无从落地。"""
     assert anchor in _status_text(), f"docs/STATUS.md 缺少必需章节：{anchor}"
 
 
 def test_live_docs_are_not_exempted_by_section6() -> None:
-    """活文档不得因 §6 脚注或交叉引用被误加入历史豁免集。"""
+    """活文档不得因 §5 脚注或交叉引用被误加入历史豁免集。"""
     historical = _historical_docs()
     live_docs = [
         "README.md",
         "ARCHITECTURE.md",
-        "docs/requirements/BRAND_BASELINE.md",
-        "docs/requirements/PRODUCT_ROADMAP.md",
-        "docs/requirements/VORTEX_CUT_USER_MANUAL.md",
-        "docs/design/AI_CAPABILITY_MASTER_PLAN.md",
+        "docs/BACKLOG.md",
+        "docs/guides/branding.md",
+        "docs/guides/user-manual.md",
+        "docs/specs/product-baseline.md",
+        "docs/specs/ai-platform.md",
     ]
     exempted = [p for p in live_docs if (REPO / p).resolve() in historical]
-    assert not exempted, f"以下活文档被 §6 误豁免：{exempted}"
+    assert not exempted, f"以下活文档被 §5 误豁免：{exempted}"
 
 
 def test_status_doc_stays_concise_and_open_only() -> None:
-    """STATUS.md 保持精简，且 §4 活性表不得滞留已核销（✅）条目。"""
+    """STATUS.md 保持精简（< 25 KiB），且 §4 活性表不得滞留已核销（✅）条目。"""
     size_bytes = STATUS_DOC.stat().st_size
-    assert size_bytes < 50 * 1024, (
-        f"docs/STATUS.md 当前大小 {size_bytes} 字节（>= 50 KiB），"
-        "请将长篇排查日志抽离至 docs/archive/ 并从 §4 移除已闭环行"
+    assert size_bytes < 25 * 1024, (
+        f"docs/STATUS.md 当前大小 {size_bytes} 字节（>= 25 KiB），"
+        "请将详细跟踪迁入 docs/BACKLOG.md 并从 §4 移除已闭环行"
     )
 
     text = _status_text()
@@ -353,9 +349,9 @@ def test_markdown_relative_links_exist() -> None:
     assert not broken, "存在失效的相对 Markdown 链接：\n  " + "\n  ".join(broken)
 
 
-_ACTIVE_SPEC_DIRS = ("docs/requirements", "docs/design")
-_INDEXED_DOC_DIRS = ("docs/requirements", "docs/design", "docs/plans")
-_MAX_ACTIVE_SPECS_PER_DIR = 20
+_ACTIVE_SPEC_DIRS = ("docs/specs",)
+_INDEXED_DOC_DIRS = ("docs/specs", "docs/plans", "docs/adr", "docs/guides")
+_MAX_ACTIVE_SPECS_PER_DIR = 15
 _PROCESS_SPRAWL_TOKENS = ("_IMPLEMENTATION_", "_VALIDATION_", "_HANDOFF", "_ROUND")
 _DISALLOWED_SPEC_PREFIX_RE = re.compile(r"^(?:M2_|W\d|WAVE\d|P\d+)")
 _DISALLOWED_SPEC_DATE_RE = re.compile(r"20\d{2}-\d{2}-\d{2}")
@@ -396,7 +392,7 @@ def test_active_doc_counts_within_budget() -> None:
 
 
 def test_no_process_sprawl_in_active_dirs() -> None:
-    """活跃需求/设计目录不得堆放实施/验收/交接/轮次流水过程文档。"""
+    """活跃规格目录不得堆放实施/验收/交接/轮次流水过程文档。"""
     violations: list[str] = []
     for rel_dir in _ACTIVE_SPEC_DIRS:
         spec_dir = REPO / rel_dir
@@ -404,7 +400,7 @@ def test_no_process_sprawl_in_active_dirs() -> None:
             if any(token in md_path.name for token in _PROCESS_SPRAWL_TOKENS):
                 violations.append(f"{rel_dir}/{md_path.name}")
     assert not violations, (
-        "活跃目录存在过程流水文件，应合并后删除或迁入 docs/archive/（AGENTS.md Rule 7/8）：\n  "
+        "活跃目录存在过程流水文件，应合并入 docs/specs/ 后删除（由 Git 历史追溯，AGENTS.md Rule 7/8）：\n  "
         + "\n  ".join(violations)
     )
 

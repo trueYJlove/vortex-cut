@@ -1,6 +1,6 @@
 # 质量评测集（W0.4）
 
-对应 `docs/requirements/QUALITY_EVAL_SPEC.md`（开放问题裁决见其 §5）。
+对应 [`docs/specs/local-intelligence.md`](../docs/specs/local-intelligence.md) §4。
 
 ## 布局
 

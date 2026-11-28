@@ -8,9 +8,10 @@
 |---|---|---|
 | [README.md](README.md) | 仓库总览、开发环境、构建/测试/CI 命令入口 | 禁止复述当前阶段、迁移版本或待办 |
 | [CLAUDE.md](CLAUDE.md) | AI Agent 薄入口（引导先读三份权威文档） | 禁止膨胀为完整规范副本 |
-| [docs/STATUS.md](docs/STATUS.md) | 唯一当前状态事实源（§1 机器校验块、能力边界、§4 未闭环承诺、§6 历史豁免） | §4 不得滞留已核销（✅）条目；总量保持 `< 50 KiB` |
+| [docs/STATUS.md](docs/STATUS.md) | 唯一当前状态事实源（§1 机器校验块、能力边界、§4 开放项索引、§5 证据豁免） | §4 不得滞留已核销（✅）条目；总量保持 `< 25 KiB` |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | 未闭环承诺、风险对策与技术债明细（承接 `STATUS.md` §4） | 禁止滞留已关闭项；禁止复述全仓阶段快照 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 现状多进程架构、模块/安全边界、核心数据模型与真实目录分层 | 禁止出现虚拟目录或复述项目进度 |
-| `docs/requirements/`、`docs/design/`、`docs/plans/` | 经各自 `README.md` 索引的专题活规格与长期在研提案 | 历史记录归 `docs/archive/`；一次性过程产物仅放 `.tmp/` |
+| `docs/specs/`、`docs/plans/`、`docs/adr/`、`docs/guides/` | 经各自 `README.md` 索引的子系统活规格、在研提案、不可逆 ADR 与使用指南 | 历史过程由 Git 追溯；一次性过程产物仅放 `.tmp/` |
 
 ### Code Change → Required Doc Sync Mapping
 
@@ -20,12 +21,12 @@
 | 进程边界、Electron Main/Preload 域、Renderer 顶层分层或 Core 子包结构变更 | 同步更新 `ARCHITECTURE.md` | Verification Gate 人工与链接检查 |
 | 核心时间线、播放头、预览/导出变更动作 | 先在 `apps/desktop/src/app/commands/` 定义可序列化 Command，再经 `editorCommands.ts` 接入 UI | Command 层契约与单测 |
 | 根级开发、测试、CI 或打包脚本变更 | 同步核对 `README.md` 与 `package.json` | Verification Gate 核对 |
-| 专题需求、设计决策或长期方案演进 | 优先扩展既有活规格（先查目录 `README.md`）或登记在 `docs/plans/`；关门按 Rule 7 清理 | `test_status_doc_consistency.py` Rules 6–8 |
+| 专题需求、设计决策或长期方案演进 | 优先扩展 `docs/specs/` 对应活规格（先查 `docs/specs/README.md`）或登记在 `docs/plans/`；关门按 Rule 7 清理 | `test_status_doc_consistency.py` Rules 6–8 |
 
 ### AI Agent Execution Rules
 
 1. **单任务范围封顶**：仅修改当前阶段或任务白名单内文件；若遇到白名单之外的架构问题或大面积测试失败，立即记录事实并暂停汇报，严禁顺带扩大重构范围。
-2. **改前先列清单**：动手编辑前先明确最小改动文件清单与对应验收门禁，确认不触碰历史 ADR 或归档记录中的历史表述。
+2. **改前先列清单**：动手编辑前先明确最小改动文件清单与对应验收门禁，确认不触碰历史 ADR 中的既有决策正文。
 3. **过程产物仅放 `.tmp/`**：一次性执行日志、调试截图、临时脚本输出与中间草稿只允许放在已忽略的 `.tmp/`，严禁向主干残留未索引的过程 `.md`。
 4. **收尾必贴实测证据**：合入或交付前必须运行对应检查（聚合检查必须用 `pnpm run ci`，严禁使用 `pnpm ci`），并如实贴出真实命令、退出码与 `git diff --stat`。
 
@@ -33,7 +34,7 @@
 
 所有功能与治理变更按以下五个客观工程门禁推进，前一门禁未满足条件前不得进入下一阶段：
 
-1. **Planning Gate**：明确变更范围、系统边界、验收标准与风险缓解措施，并将门禁工作包与风险项登记到 `docs/STATUS.md` §4。
+1. **Planning Gate**：明确变更范围、系统边界、验收标准与风险缓解措施，并将门禁工作包与风险项登记到 `docs/STATUS.md` §4 与 `docs/BACKLOG.md`。
 2. **Design Gate**：冻结契约/DTO（`packages/contracts`）、SQLite 迁移与核心模块实现方案，确保不破坏跨进程安全边界。
 3. **Implementation Gate**：在白名单范围内完成代码、单测与对应权威文档的并行更新。
 4. **Verification Gate**：通过独立复核验证范围一致性、隐私/安全/性能约束、自动化测试覆盖率及文档同步纪律（Rules 1–8）。
@@ -53,8 +54,8 @@ therefore pairs a written rule with a machine check.
 
 `docs/STATUS.md` is the **only** place that declares current state. No other document may restate
 the current stage, migration version, capability boundary, or completion status. Other documents
-must **reference** STATUS.md instead. This applies to `README.md`, `BRAND_BASELINE.md`, roadmaps,
-handoffs, and the user manual alike.
+must **reference** STATUS.md instead. This applies to `README.md`, `docs/guides/branding.md`,
+`docs/specs/`, `docs/plans/`, and `docs/guides/user-manual.md` alike.
 
 ### Rule 2 — Machine-checked facts (enforced by test)
 
@@ -76,82 +77,71 @@ status claim (blacklist maintained in the test).
 ### Rule 3 — Commitments must be registered and closed
 
 **Any** commitment written in a Planning Gate — acceptance item, **risk mitigation**, or resolved
-open question — MUST be registered in `docs/STATUS.md` §4. It is closed only by updating §4 with
-evidence and date. An unregistered commitment is treated as non-existent; an unclosed one is
-tracked debt.
+open question — MUST be registered in `docs/STATUS.md` §4 (one-line summary) with detailed tracking
+in `docs/BACKLOG.md`. It is closed only when verified with evidence and removed from both lists.
+An unregistered commitment is treated as non-existent; an unclosed one is tracked debt.
 
-**Registration granularity** (refined 2026-09-24 after first use):
-
+**Registration granularity**:
 - **A gate is registered as ONE row** (type: 工作包), not one row per acceptance sub-item —
-  otherwise §4 becomes unreadable and people stop maintaining it.
-- **Individually registered** regardless of the above: risk mitigations, resolved open questions,
-  and any acceptance item that has already been silently dropped once. These are the ones with a
-  proven failure mode.
-- **Closing a gate row requires the implementation record to contain an acceptance cross-check
-  table** listing every acceptance item with its outcome (see
-  `AI_2_SKIP_FRAME_IMPLEMENTATION_2026-09-24.md` §5 for the pattern). Without that table, the row
-  stays open — the gate is not closed by assertion.
-
-Risk mitigations are explicitly included because they are the ones that rot silently: acceptance
-items at least have a checklist, mitigations have none.
+  otherwise `STATUS.md` §4 becomes unreadable.
+- **Individually registered**: risk mitigations, resolved open questions, and any acceptance item
+  that has already been silently dropped once.
+- **Closing a gate row** requires verifying every acceptance item against evidence before removing
+  the row and merging durable conclusions into `docs/specs/`.
 
 ### Rule 4 — Point-in-time records must not be cited as current
 
-Acceptance records, validation reports, and implementation records describe a moment in time.
+Experiment results and point-in-time verification records under `evidence/` describe a moment in time.
 When superseded, add a `已被 X 取代` banner at the top **and** list the document in
-`docs/STATUS.md` §6. Never cite them as current state.
+`docs/STATUS.md` §5. Never cite them as current state.
 
 ### Rule 5 — Reference, do not restate
 
 If you are about to write "当前处于…", "最新版本是…", or "尚未实现…" outside `docs/STATUS.md`,
-stop and link to STATUS.md instead. Restating state is the origin of drift.
+stop and link to `docs/STATUS.md` instead. Restating state is the origin of drift.
 
-### Rule 6 — Single living doc per module (consolidate, don't multiply)
+### Rule 6 — Single living spec per subsystem (consolidate, don't multiply)
 
-Before creating a new `.md` file under `docs/requirements/` or `docs/design/`, check
-`docs/requirements/README.md` and `docs/design/README.md` to see whether an active living spec
-already covers that subsystem. Extend the existing spec with a new numbered section instead of
-creating a parallel file; only split when a single document becomes unwieldy (and register the
-new file in its directory `README.md` in the same change).
+Before creating a new `.md` file under `docs/specs/`, check `docs/specs/README.md` to see whether an
+active living spec already covers that subsystem (combining requirements, design, and contracts).
+Extend the existing spec with a numbered section instead of creating a parallel file; only split
+when a single document becomes unwieldy (and register it in `docs/specs/README.md` in the same change).
 
 ### Rule 7 — Close-gate cleanup (Definition of Done)
 
 Closing a gate or work package in `docs/STATUS.md` is not complete until its doc footprint is cleaned up:
-- Merge any durable requirements, architecture, or contract decisions into the module's living spec;
-- Remove closed rows from `docs/STATUS.md` §4 once verified (relying on Git commit history for closed ticket logs; do not maintain a separate `STATUS_ARCHIVE.md`);
-- Move records that must remain addressable by code comments or open items to `docs/archive/` (marking superseded docs per Rule 4 and `docs/STATUS.md` §6), and delete transient validation logs, round reports, handoffs, debug screenshots, and scratch spikes once merged.
+- Merge any durable requirements, architecture, or contract decisions into the subsystem's living spec under `docs/specs/`;
+- Remove closed rows from `docs/STATUS.md` §4 and `docs/BACKLOG.md` once verified (relying on Git commit history for closed ticket logs; never maintain a `docs/archive/` directory or `STATUS_ARCHIVE.md`);
+- Delete finished `docs/plans/` files, transient validation logs, round reports, handoffs, debug screenshots, and scratch spikes once merged.
 
 ### Rule 8 — Active directories stay lean, indexed, bounded, and cleanly named
 
-Every active `.md` file directly under `docs/requirements/`, `docs/design/`, or `docs/plans/` must
-be listed in that directory's `README.md`. `docs/requirements/` and `docs/design/` are each capped
-at **20** top-level living specs (excluding `README.md`); active in-progress/proposed plans belong
-in `docs/plans/` (deleted or moved into living specs once closed). `docs/STATUS.md` stays under
-**50 KiB** with concise open summaries and zero closed (`✅`) rows in §4. Living spec filenames directly under
-`docs/requirements/` and `docs/design/` must use stable domain names: no date stamps
-(`20XX-XX-XX`), no milestone/wave/work-package prefixes (`M2_`, `W\d`, `WAVE\d`, `P\d+`), and no
+Every active `.md` file directly under `docs/specs/`, `docs/plans/`, `docs/adr/`, or `docs/guides/` must
+be listed in that directory's `README.md`. `docs/specs/` is capped at **15** top-level living specs
+(excluding `README.md`); active in-progress/proposed plans belong in `docs/plans/` (deleted after merging
+into `docs/specs/`). `docs/STATUS.md` stays under **25 KiB** with concise open summaries and zero closed
+(`✅`) rows in §4. Living spec filenames under `docs/specs/` must use stable lowercase domain names: no date
+stamps (`20XX-XX-XX`), no milestone/wave/work-package prefixes (`M2_`, `W\d`, `WAVE\d`, `P\d+`), and no
 process suffixes (`_PLANNING_GATE`, `_DESIGN_GATE`, `*_IMPLEMENTATION_*`, `*_VALIDATION_*`,
-`*_HANDOFF*`, `*_ROUND*`, which belong in `docs/archive/` only when kept for reference); H1 headings
-of living specs should also omit `Planning Gate` / `Design Gate` draft suffixes.
+`*_HANDOFF*`, `*_ROUND*`); H1 headings of living specs should also omit `Planning Gate` / `Design Gate` draft suffixes.
 
 ### Enforcement
 
 - **Rule 2 & Rules 6–8** — enforced by `services/core/tests/unit/test_status_doc_consistency.py`,
-  which checks STATUS §1 facts against code, scans live docs (excluding `docs/archive/`) for
-  blacklisted stale claims, verifies Markdown relative links, enforces `< 50 KiB` and zero `✅`
-  rows in `STATUS.md` §4, requires every active doc under `docs/requirements/`, `docs/design/`,
-  and `docs/plans/` to be indexed in its directory `README.md`, caps `docs/requirements/` and
-  `docs/design/` at `<= 20` living specs each, and rejects process sprawl, date stamps, draft gate H1
-  headings, or milestone/ticket prefixes in active spec filenames. `services/core/tests/unit/test_keyframe_wording.py`
-  enforces W3.3 wording consistency across `docs/**/W3_3_*.md` and `docs/**/KEYFRAME_UNDERSTANDING_*.md`.
-  CI executes both via `pnpm test:python`
-  (`uv run --locked --extra dev pytest services/core/tests/unit`). Run directly with:
+  which checks STATUS §1 facts against code, scans live docs for blacklisted stale claims, verifies
+  Markdown relative links, enforces `< 25 KiB` and zero `✅` rows in `STATUS.md` §4, requires every
+  active doc under `docs/specs/`, `docs/plans/`, `docs/adr/`, and `docs/guides/` to be indexed in its
+  directory `README.md`, caps `docs/specs/` at `<= 15` living specs, and rejects process sprawl, date
+  stamps, draft gate H1 headings, or milestone/ticket prefixes in active spec filenames.
+  `services/core/tests/unit/test_keyframe_wording.py` enforces W3.3 wording consistency across
+  `docs/**/keyframe-understanding*.md` (and legacy `W3_3_*` / `KEYFRAME_UNDERSTANDING_*` patterns).
+  CI executes both via `pnpm test:python` (`uv run --locked --extra dev pytest services/core/tests/unit`).
+  Run directly with:
   `uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py services/core/tests/unit/test_keyframe_wording.py`.
 - **Python unit tests** — `pnpm run ci` covers lint / typecheck / Desktop tests / **Python unit
   tests** / build; `pnpm run ci:release` adds the Electron e2e suite.
   **必须写 `pnpm run ci`，不能写 `pnpm ci`**：`ci` 是 pnpm 的内置命令（`ERR_PNPM_CI_NOT_IMPLEMENTED`），
-  直接 `pnpm ci` 会**报错退出而根本不执行本仓脚本**（2026-10-23 实测踩中——此前本节写的就是
-  `pnpm ci`，属「写了个无法执行的命令」）。CI 侧由 `.github/workflows/ci.yml` 的两个 job 覆盖：
+  直接 `pnpm ci` 会**报错退出而根本不执行本仓脚本**。CI 侧由 `.github/workflows/ci.yml` 的两个 job 覆盖：
   `python-unit`（`pnpm test:python`）与 `desktop`（lint / typecheck / vitest / build）。
   `pnpm test:python` 由 `tools/ci/run_pytest_gate.py` 统一执行 `services/core/tests/unit` 与
   `services/core/tests/integration/test_*_routes.py` 路由回归锁，并在 pytest 通过后运行

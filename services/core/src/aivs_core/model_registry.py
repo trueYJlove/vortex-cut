@@ -680,7 +680,7 @@ def _local_source_url(parsed: Any, model_file: ModelFile) -> str:
     改成 `Path.as_uri()` 产出的 `file:///C:/...` 形式两边都认，顺带把空格/中文正确转义。
 
     为什么复用 MODEL_DOWNLOAD_FAILED 而不新增错误码：MODEL_* 是
-    docs/archive/STAGE1B_CONTRACT_FREEZE.md:283-291 冻结的稳定码集合，
+    docs/specs/ai-platform.md §4 冻结的稳定码集合，
     packages/contracts/src/index.ts:116-118 同步维护同一集合；
     app.py:1148 只按 code 选 HTTP 状态、message 原样透出。对调用方而言
     "本地来源没准备好"与"下载失败"是同一件事（都要先备好来源再重试），

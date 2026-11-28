@@ -49,7 +49,7 @@ const keyframePropertyLabels: Array<{ property: "position" | "scale" | "rotate" 
 ];
 
 /**
- * 片段属性面板 v2：按 docs/design/PROPERTY_PANEL_DESIGN.md §1.1 信息架构分页签。
+ * 片段属性面板 v2：按 docs/specs/desktop-ui.md §1.1 信息架构分页签。
  * 视频/图片：画面（基础·抠像·蒙版）/ 音频 / 变速（含倒放）/ 动画；音频素材：基础 / 换音色 / 声音效果 / 变速。
  * 仅重组 UI，patch 操作与字段语义与 v1 完全一致；「规划中」为静态占位。
  */

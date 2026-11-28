@@ -4,7 +4,7 @@
  * ToOffscreen 每元素仅可一次——会话生命周期 = 画布生命周期）。
  * C20 第二阶段：VITE_AIVS_PREVIEW_IR_V2=0 时走 v1 全量帧表（Renderer 驻留
  * 全表）；v2 走 manifest+窗口帧源。
- * C20 v2 默认 on（2026-09-13，PERFORMANCE_C20V2_DEFAULT_ON_DECISION_2026-09-13.md）：
+ * C20 v2 默认 on（2026-09-13，见 docs/specs/preview-and-rendering.md §4.2）：
  * VITE_AIVS_PREVIEW_IR_V2=0 显式回退 v1（v1 路径保留、语义不变）。 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseIr, type Ir } from "./ir.js";
@@ -17,7 +17,7 @@ import { editorPerf } from "./perf-metrics.js";
 import { parsePreviewIrV2Manifest, PREVIEW_IR_V2_MAX_WINDOW_FRAMES, type PreviewIrV2Manifest } from "@aivideo/contracts";
 
 const previewIrV2Enabled = (): boolean => {
-  // C20 v2 默认 on(2026-09-13 LiuWei 裁决,PERFORMANCE_C20V2_DEFAULT_ON_DECISION_2026-09-13.md);
+  // C20 v2 默认 on(2026-09-13 LiuWei 裁决,见 docs/specs/preview-and-rendering.md §4.2);
   // VITE_AIVS_PREVIEW_IR_V2=0 为显式回退开关,长期保留。
   try { return import.meta.env.VITE_AIVS_PREVIEW_IR_V2 !== "0"; } catch { return true; }
 };

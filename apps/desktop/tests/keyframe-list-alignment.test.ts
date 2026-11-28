@@ -4,7 +4,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
 /**
  * C 族「列表型」行对齐的级联回归（2026-11-09）。
  *
- * 结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
+ * 结构稿：apps/desktop/tests/fixtures/dialog-system-v2/prototype-list-family.html
  *
  * 为什么要锁「徽章固定列宽」：行内三列是
  *   主信息（可伸缩） | 状态徽章 | 操作按钮

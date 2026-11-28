@@ -1,30 +1,30 @@
 # 文档入口
 
-项目文档分为**需求规格（`requirements/`）**、**系统与模块设计（`design/`）**与**在研方案（`plans/`）**三大活跃目录；唯一当前状态源见 [`STATUS.md`](STATUS.md)，被代码/开放项引用的少数只读历史文档见 [`archive/`](archive/README.md)，实验与测量依据见根目录 [`evidence/`](../evidence/README.md)。
+项目文档采用纯 Markdown 分层组织：唯一现状源见 [`STATUS.md`](STATUS.md)，未闭环追踪明细见 [`BACKLOG.md`](BACKLOG.md)，子系统需求与设计活规格见 [`specs/`](specs/README.md)，在研提案见 [`plans/`](plans/README.md)，不可逆架构裁决见 [`adr/`](adr/README.md)，用户与品牌指南见 [`guides/`](guides/README.md)，实验测量证据见 [`../evidence/README.md`](../evidence/README.md)。
 
 ## 新读者阅读顺序
 
-1. 仓库根目录 [`README.md`](../README.md)：产品介绍、开发环境与常用命令。
-2. [`STATUS.md`](STATUS.md)：唯一当前状态源（工作线、已交付能力边界、未闭环承诺与待办）。
-3. [`ARCHITECTURE.md`](../ARCHITECTURE.md)：进程边界、核心模块、数据模型与架构原则。
-4. [`VORTEX_CUT_USER_MANUAL.md`](requirements/VORTEX_CUT_USER_MANUAL.md)：从用户视角了解编辑器操作。
-5. 按工作域查找下表专题地图，或进入 [`requirements/`](requirements/README.md)、[`design/`](design/README.md) 与 [`plans/`](plans/README.md)。
+1. [`../README.md`](../README.md)：仓库总览、开发环境与常用构建/测试命令。
+2. [`STATUS.md`](STATUS.md)：唯一当前状态源（工作线、已交付能力边界、开放项索引）。
+3. [`../ARCHITECTURE.md`](../ARCHITECTURE.md)：进程边界、安全模型、核心数据结构与真实代码分层。
+4. [`guides/user-manual.md`](guides/user-manual.md)：从创作者视角了解编辑器操作。
+5. 按主题域查阅下表或进入 [`specs/`](specs/README.md)、[`BACKLOG.md`](BACKLOG.md)、[`plans/`](plans/README.md) 与 [`adr/`](adr/README.md)。
 
 ## 专题地图（Topic Map）
 
-| 主题域 | 需求规格（`requirements/`） | 设计 / 契约 / 活跃计划 | 归档与证据 |
+| 主题域 | 活规格（`specs/`） | 在研计划 / 决策 / 指南 | 证据与追踪 |
 |---|---|---|---|
-| **编辑核心与剪辑语法** | [产品路线图](requirements/PRODUCT_ROADMAP.md)、[剪辑语法与手法](requirements/EDITING_TOOLS_SPEC.md)、[质量评测](requirements/QUALITY_EVAL_SPEC.md) | [多轨时间线](design/TIMELINE_MULTI_TRACK_DESIGN.md)、[自由定位](design/FREE_POSITIONING_DESIGN.md)、[转场](design/TRANSITIONS_DESIGN.md)、[关键帧](design/KEYFRAMES_DESIGN.md)、[字幕与花字](design/CAPTIONS_RENDERING_DESIGN.md) | [Wave 1 手测清单](archive/WAVE1_MANUAL_CHECKLIST_2026-10-10.md)、`evidence/quality_eval/` |
-| **桌面 UI、OpenFilm 对齐与工作区** | [用户手册](requirements/VORTEX_CUT_USER_MANUAL.md)、[品牌基线](requirements/BRAND_BASELINE.md) | [属性面板设计](design/PROPERTY_PANEL_DESIGN.md)、[弹窗视觉规范 v2](design/ui-mockups/dialog-system-v2/DESIGN.md)、[P236 解耦与 Agent 工作区（计划）](plans/P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md)、[P235 OpenFilm 对齐（计划）](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md) | `evidence/p235-openfilm-timeline-parity-*` |
-| **预览引擎、解码与性能** | [预览引擎、缩略图与合成流畅度](requirements/PREVIEW_ENGINE_SPEC.md) | [M3 IR 契约归档](archive/STAGE_M3_0_IR_CONTRACT_DRAFT.md)、[B13 驻留门归档](archive/PERFORMANCE_B13_RESIDENCY_PLANNING_GATE_2026-09-11.md) | [未闭环排查流水](archive/OPEN_ISSUES_DETAILED_LOG_2026-11.md)、[`evidence/performance/`](../evidence/performance/README.md) |
-| **AI 能力线与隐私** | [CV 采样与预算](requirements/CV_SAMPLING_SPEC.md)、[多机位同步](requirements/CAMERA_SYNC_SPEC.md)、[语义检索](requirements/SEMANTIC_SEARCH_SPEC.md)、[关键帧理解](requirements/KEYFRAME_UNDERSTANDING_SPEC.md)、[信号融合](requirements/SIGNAL_FUSION_SPEC.md) | [AI 能力总纲](design/AI_CAPABILITY_MASTER_PLAN.md)、[AI 工作单与字幕生成](design/AI_WORKLIST_DESIGN.md)、[多机位设计](design/CAMERA_SYNC_DESIGN.md)、[关键帧理解设计](design/KEYFRAME_UNDERSTANDING_DESIGN.md)、[ADR 索引](design/adr/README.md) | [W3.3 实施摘要](archive/W3_3_IMPLEMENTATION_SUMMARY_2026-10-21.md) |
-| **工程治理、CI 与契约** | [`AGENTS.md`](../AGENTS.md) | [Stage 1B 错误码契约](archive/STAGE1B_CONTRACT_FREEZE.md) | — |
+| **产品基线与编辑核心** | [产品与编辑能力基线](specs/product-baseline.md)、[时间线与核心剪辑](specs/timeline-and-editing.md) | [P235 OpenFilm 时间线对齐](plans/P235_OPENFILM_TIMELINE_PARITY_PLAN.md)、[P236 解耦与 Agent 工作区](plans/P236_TIMELINE_DECOUPLING_AND_AGENT_WORKSPACE_PLAN_2026-11-24.md) | `evidence/quality_eval/`、[`BACKLOG.md`](BACKLOG.md) |
+| **预览、渲染与性能** | [预览与权威渲染引擎](specs/preview-and-rendering.md) | — | [`evidence/performance/`](../evidence/performance/README.md)、[`evidence/m3_0/`](../evidence/m3_0/liukeai_acceptance/ACCEPTANCE_REPORT.md) |
+| **桌面 UI 与品牌指南** | [桌面端 UI 与弹窗视觉规范](specs/desktop-ui.md) | [用户使用手册](guides/user-manual.md)、[品牌与图标资产](guides/branding.md) | `apps/desktop/tests/fixtures/dialog-system-v2/`、`evidence/2026-11-09-dialog-family-c/` |
+| **AI 平台、感知与同步** | [AI 平台与工作单](specs/ai-platform.md)、[本地智能与评测](specs/local-intelligence.md)、[多机位同步](specs/camera-sync.md)、[关键帧理解](specs/keyframe-understanding.md) | [ADR 架构决策索引](adr/README.md)（`ADR-0003`–`0009`） | `evidence/2026-10-*` |
+| **工程治理与状态** | [`../AGENTS.md`](../AGENTS.md) | [`STATUS.md`](STATUS.md)、[`BACKLOG.md`](BACKLOG.md) | `test_status_doc_consistency.py`、`test_keyframe_wording.py` |
 
 ## 文档维护约定
 
-1. **单模块单活文档 + 领域命名**：活跃规格按业务模块原地演进，文件名与一级标题保持领域名称（不带日期、代号与门后缀）；进行中方案放 [`plans/`](plans/README.md)（见 [`AGENTS.md`](../AGENTS.md) Rule 6–8）。
-2. **关门即清理**：承诺在 [`STATUS.md`](STATUS.md) §4 核销时，同提交把长期结论并入活文档并移除已闭环行（由 Git 历史追溯），清理临时过程文件。
-3. **提交前必跑门禁**：
+1. **单模块单活规格 + 领域命名**：现行需求与设计合入 [`specs/`](specs/README.md) 对应领域文件；在研提案放 [`plans/`](plans/README.md)，核销后结论并入 `specs/` 并删除计划文件（由 Git 历史追溯过程）。
+2. **状态与明细分离**：[`STATUS.md`](STATUS.md) 保持 `< 25 KiB` 仅保留核心事实与一行开放索引，详细上下文与风险追踪放 [`BACKLOG.md`](BACKLOG.md)，均严禁滞留 `✅` 已关闭条目。
+3. **提交前门禁**：
    ```powershell
    uv run --locked --extra dev pytest services/core/tests/unit/test_status_doc_consistency.py services/core/tests/unit/test_keyframe_wording.py
    ```

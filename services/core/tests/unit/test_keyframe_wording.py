@@ -61,9 +61,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[4]
 DOCS = REPO / "docs"
 
-# 扫描范围：递归 glob 全量（覆盖原 W3_3_* 归档/文档与更名后的 KEYFRAME_UNDERSTANDING_* 活文档）。
+# 扫描范围：递归 glob 全量（覆盖 keyframe-understanding 活规格与历史 W3_3_*/KEYFRAME_UNDERSTANDING_* 命名）。
 # **不要**换成写死的文件名列表——那会让将来新增的实施记录自动逃逸。
-SCAN_GLOBS = ("**/W3_3_*.md", "**/KEYFRAME_UNDERSTANDING_*.md")
+SCAN_GLOBS = ("**/keyframe-understanding*.md", "**/W3_3_*.md", "**/KEYFRAME_UNDERSTANDING_*.md")
 
 # 优越性表述。刻意做成一个显式枚举而不是宽泛的"更"前缀：
 # 那会误伤"更多/更快/更少"等中性的工程描述（比如"更多帧被移除"），
@@ -159,12 +159,9 @@ def test_scan_covers_all_w3_3_documents() -> None:
     """
     paths = scan_paths()
     names = {path.name for path in paths}
-    # 活文档已规范命名为 KEYFRAME_UNDERSTANDING_SPEC/DESIGN，
-    # S1a–S5a 切片记录已归并入 W3_3_IMPLEMENTATION_SUMMARY_2026-10-21.md（共 3 份）。
-    assert len(paths) >= 3, f"扫描集过小，疑似 glob 写错：{sorted(names)}"
-    assert "KEYFRAME_UNDERSTANDING_SPEC.md" in names, names
-    assert "KEYFRAME_UNDERSTANDING_DESIGN.md" in names, names
-    assert any("IMPLEMENTATION" in name for name in names), names
+    # 活规格已收口为 docs/specs/keyframe-understanding.md。
+    assert len(paths) >= 1, f"扫描集过小，疑似 glob 写错：{sorted(names)}"
+    assert "keyframe-understanding.md" in names, names
 
 
 def test_exemption_markers_are_narrow() -> None:
@@ -206,7 +203,7 @@ def test_a9_criterion_line_is_exempt_but_not_by_filename() -> None:
     同文件里任意一行写"质量提升明显"都会逃逸——第二段断言正好
     检验同一文件内的裸断言仍会被抓。
     """
-    gate = DOCS / "requirements/KEYFRAME_UNDERSTANDING_SPEC.md"
+    gate = DOCS / "specs/keyframe-understanding.md"
     text = gate.read_text(encoding="utf-8")
     a9_line = next(
         line for line in text.splitlines() if line.startswith("| **A9**")

@@ -2,7 +2,7 @@
 
 本文件用**假 HTTP client**：要验的是"探测编排 + 六列落库 + 门禁",
 不是网关行为。真实网关探测属 S3 的 0.13 实测（另见
-`docs/design/W3_3_S3_PROVIDER_PROBE_2026-10-21.md`），不在单测里烧额度。
+`docs/specs/keyframe-understanding.md` §4），不在单测里烧额度。
 
 四条硬约束（每条都有对应断言）：
 

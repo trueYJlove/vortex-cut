@@ -1,6 +1,6 @@
 """W0.4 质量评测指标（纯函数，零 egress，无第三方依赖）。
 
-口径冻结于 `docs/requirements/QUALITY_EVAL_SPEC.md` §2.3：
+口径冻结于 `docs/specs/local-intelligence.md` §4.2：
 改容差 / k / 公式必须改快照元数据并走门禁，禁止静默改口径救指标。
 """
 

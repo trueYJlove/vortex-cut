@@ -4,7 +4,7 @@ import { readDesktopStyles } from "./helpers/read-styles.js";
 /**
  * C 族「列表型」· 形态 3（AI 字幕优化）回归（2026-11-09）。
  *
- * 结构稿：docs/design/ui-mockups/dialog-system-v2/prototype-list-family.html
+ * 结构稿：apps/desktop/tests/fixtures/dialog-system-v2/prototype-list-family.html
  *
  * 这个面板有 8 处 .readonly-note（全仓最多）。提示分级把其中 6 处降为中性小字后，
  * 原本被色块掩盖的三个缺陷裸奔了：

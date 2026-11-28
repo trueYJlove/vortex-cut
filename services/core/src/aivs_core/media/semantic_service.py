@@ -1,6 +1,6 @@
 """W3.1 素材池语义检索：ONNX 双塔 + 索引服务。
 
-规划门：`docs/requirements/SEMANTIC_SEARCH_SPEC.md` §2.1–§2.5。
+规划门：`docs/specs/local-intelligence.md` §2。
 
 分层纪律（与 beat_grid / speaker 同款）：
 - 纯算法在 `semantic.py`（零 I/O，可单测）；
