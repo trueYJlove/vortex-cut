@@ -12,7 +12,8 @@
   --vc-border-2: #32323f;
   --vc-text: #e8e8ef;
   --vc-text-2: #9a9aab;
-  --vc-accent: #00c1cd;
+  /* P220 (P237 D3)：单源收敛至 --dlg-primary（深色 #00c1cd / 浅色 #0098a3），存量 var(--vc-accent) 引用逐步替换后删除 */
+  --vc-accent: var(--dlg-primary);
   --vc-accent-soft: rgba(0, 193, 205, .18);
 }
 :root { background: var(--vc-bg); color: var(--vc-text); }

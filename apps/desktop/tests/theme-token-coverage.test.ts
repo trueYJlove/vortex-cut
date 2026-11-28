@@ -217,4 +217,32 @@ describe("主题令牌覆盖率", () => {
     const missing = [...dark].filter((name) => !light.has(name) && !name.startsWith("--tl-") && !name.startsWith("--clip-") && !name.startsWith("--pp-") && !name.startsWith("--ws-") && !name.startsWith("--dlg-") && !name.startsWith("--ctl-") && !name.startsWith("--btn-") && !name.startsWith("--vc-"));
     expect(missing, `这些令牌只有深色值，浅色主题下会漏用深色：\n${missing.join("\n")}`).toEqual([]);
   });
+
+  it("P220：--vc-accent 仅作为 --dlg-primary 的单源别名，不得出现颜色字面量或重复定义", () => {
+    const declarations: Array<{ selector: string; value: string; line: number }> = [];
+    for (const rule of all) {
+      for (const m of rule.body.matchAll(/(?:^|;)\s*--vc-accent\s*:\s*([^;]+)/g)) {
+        declarations.push({
+          selector: rule.selector,
+          value: m[1].replace(/\s+/g, ""),
+          line: rule.line,
+        });
+      }
+    }
+    expect(declarations, "应恰好只在 :root 保留一处 --vc-accent 别名定义").toHaveLength(1);
+    expect(declarations[0].selector).toBe(":root");
+    expect(declarations[0].value).toBe("var(--dlg-primary)");
+
+    const hasDlgPrimary = (selector: string) =>
+      all.some(
+        (rule) =>
+          rule.selector === selector &&
+          /(?:^|;)\s*--dlg-primary\s*:\s*#[0-9a-fA-F]{3,8}/.test(rule.body),
+      );
+    expect(hasDlgPrimary(":root"), ":root 必须定义 --dlg-primary").toBe(true);
+    expect(
+      hasDlgPrimary('html[data-theme="light"]'),
+      'html[data-theme="light"] 必须定义 --dlg-primary',
+    ).toBe(true);
+  });
 });

@@ -273,7 +273,7 @@ html[data-theme="dark"] .editor-shell .timeline-cover-entry { color:var(--tl-cov
   --vc-border-2:rgba(16,16,24,.18);
   --vc-text:#1a1a1f;
   --vc-text-2:#5a5a63;
-  --vc-accent:#0098a3;
+  /* --vc-accent 已按 P220 收敛为 :root 别名 var(--dlg-primary)，随 html[data-theme="light"] 的 --dlg-primary 自动切换 */
   --vc-accent-soft:rgba(0,152,163,.14);
 }
 
