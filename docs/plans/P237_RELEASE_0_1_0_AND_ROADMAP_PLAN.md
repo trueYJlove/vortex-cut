@@ -16,7 +16,7 @@
 
 目标：STATUS.md §4 开放行从约 32 行降到 ≤ 24 行。
 
-- [ ] **0.1 P232** Filmstrip 预抽：跑全量门禁（`pnpm run ci`），通过后按 Rule 7 核销（结论已在 `specs/preview-and-rendering.md` §3，核对后移除 §4/BACKLOG 行）。
+- [x] **0.1 P232** Filmstrip 预抽：跑全量门禁（`pnpm run ci`），通过后按 Rule 7 核销（结论已在 `specs/preview-and-rendering.md` §3，核对后移除 §4/BACKLOG 行）。（2026-11-28 已核销：`pnpm run ci` 全绿；同时以 best-of-3 p95 稳定了拖动规划挂钟断言）
 - [ ] **0.2 P217** Graphite 弹窗：整体核销确认（28 个弹窗证据见 `evidence/2026-11-09-dialog-family-c/`），结论并入 `specs/desktop-ui.md` §2 后移除。
 - [ ] **0.3 P230** 五项观察：①②③⑤ 已落地，④ 由 P231、预抽由 P232 接续 → 直接核销。
 - [ ] **0.4 P231** 补 A2 `ffmpeg`/IR 逐像素对拍证据，达标后核销。

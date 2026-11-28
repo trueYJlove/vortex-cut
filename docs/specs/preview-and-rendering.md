@@ -84,6 +84,7 @@
   - `params`：`{ step_ms }`——对齐 `1 · 2 · 2.5 · 5 × 10^n ms` 阶梯档位（覆盖 ≤ 2.5× 稀疏）。
   - `sprite`：单列 JPEG，格宽固定 `160px`，格高按显示宽高比计算；元数据 JSON `{ step_ms, cell_w, cell_h, count, duration_us }`。
 - **跨端协作**：`contracts` `JobKind` 含 `"filmstrip"`（不动 `PROTOCOL_VERSION`）；Desktop `performance-ipc` 提供 `filmstrip:media`，`ThumbnailLoader` 优先查 `SpriteFrameSource`，跨档位后台重抽期间由旧档位 sprite 兜底，永不空格。
+- **调度与轮询**：`job_scheduler` 将 `filmstrip` 登记为 light 资源、priority 3（低于用户正在看的波形，与 proxy 同档；未登记会按 unknown 保守独占 heavy 槽挡住导出）；Desktop `loadFilmstripsOnce` 每个素材只发一路请求，未就绪时按 `SPRITE_RETRY_BACKOFF_MS`（250ms 起、最多 10 档）退避重试，作业 failed 或 `MEDIA_NO_VIDEO` 时立即放弃并负缓存；`step_ms` 由 `thumbnailStepMs(THUMB_CELL_PX(80px) / pps × 速度)` 单一来源按 1·2·2.5·5×10ⁿ 阶梯取整（与 Core `ladder_step_ms` 同表）。
 
 ---
 

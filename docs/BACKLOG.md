@@ -51,11 +51,6 @@
 - **出处**：[`specs/preview-and-rendering.md`](specs/preview-and-rendering.md) §1
 - **要点**：全视觉轨 `layers`、同轨转场与 `IR_PROJECTOR_VERSION=7` 已交付，A1/A3/A6/A7/A10 与隐藏轨真机 E2E 通过；仅余 A2 `ffmpeg`/IR 逐像素对拍补证。
 
-### P232 · 素材级缩略图预抽（Filmstrip Sprite + 迁移 v44） {#p232}
-- **类型 / 状态**：工作包｜⏳ **已实现并与真机对齐，待全量门禁收尾核销**
-- **出处**：[`specs/preview-and-rendering.md`](specs/preview-and-rendering.md) §3 / `filmstrip.py` / `database_v44.py`
-- **要点**：已修复 `JobKind`、轮询退避、档位单源 `/80` 与 `job_scheduler` 轻量调度。
-
 ### P230 · 时间线 / 预览五项 OpenFilm 对齐遗留观察 {#p230}
 - **类型 / 状态**：工作包｜🟡 **①②③⑤ 与二轮修正已落地，④ 已分立为 P231，缩略图预抽由 P232 接续**
 - **出处**：`styles.css` / `TimelineCanvas.tsx` / `thumbnail-loader.ts` / `App.tsx`
