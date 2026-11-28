@@ -66,6 +66,7 @@
 - **蒙版与抠像（双端 shader / FFmpeg `rgba-geq` 同式）**：
   - `effects.mask`：`ellipse` 硬边 `clamp(1−d)`、`rect` 硬边 `clamp(1−norm)`、`linear` 软边 `clamp(0.5 + ux/(feather·pw))`，`feather` 将过渡带收进边界内侧 `[1−feather, 1]`；支持 `rotation`（角度）与 `invert`。
   - `effects.keying`：`dist01 = RGB欧氏距离 / (255·√3)`，`≤ similarity` 全透明、`≥ similarity+blend` 全不透明、中间线性；`mask × keying` 相乘。
+- **显示方向与竖拍旋转（P206）**：`ffprobe` 扫描完整 `side_data_list` 归一化 `rotation`（含 `-90→270`）；`frame_decode` 加 `-noautorotate` 保证 NV12 平面行宽不花屏；IR `inputs[].geometry` 携带 `display_width/display_height/rotation` 供布局铺满画布；Desktop 合成器按 `needsTextureAxisSwap` 仅对未烘焙原片交换采样 UV 轴（代理已 autorotate 烘焙则不换轴）；权威渲染 `_pip_overlay_chain` 同口径按 `rotation ∈ {90, 270}` 换轴算内容盒（`test_rotation_regression.py`、`test_frame_decode_rotation.py` 与 `rotation-portrait-fill.test.ts` 锁定）；画布比例以项目画布为唯一真源（2026-11-18 已取消「适应」跟随素材）。
 
 ### 2.3 双端一致性度量与已知系统差红线
 

@@ -88,7 +88,6 @@
 | P200 | 长时线（~8m+）每 ~10s 冻结退化 | 缺陷修复 | 🟡 7 轮排查已排除 IPC/主线程假说，根因待定位；P237 并行线 B 限期 3 个工作日，未果则降级为已知边界 | [`BACKLOG#p200`](BACKLOG.md#p200) |
 | P203 | iPhone HDR（10-bit HLG HEVC）播放挂死 | 缺陷修复 | 🟡 已走软解兜底不挂死，缺代理就绪复测 | [`BACKLOG#p203`](BACKLOG.md#p203) |
 | P204 | 含 `elst` 偏移素材全帧 `no sample` | 缺陷修复 | 🟡 已修并通过 remux 验证，完整播放受 P203 关联 | [`BACKLOG#p204`](BACKLOG.md#p204) |
-| P206 | iPhone 竖拍（`rotation=-90`）呈现方向 | 缺陷修复 | 🟡 已防花屏，缺「适应」读 rotation 与铺满回归锁 | [`BACKLOG#p206`](BACKLOG.md#p206) |
 | P207 | 预览代理自动生成与切换边界 | 缺陷修复 | 🟡 主链路已交付，保留两项非阻塞边界 | [`BACKLOG#p207`](BACKLOG.md#p207) |
 | P216 | 解码探测写死合成 codec string | 缺陷修复 | 🟡 暂走坏帧降级兜底，待定探测改造路线 | [`BACKLOG#p216`](BACKLOG.md#p216) |
 | P187/P188 | 响度全片入口 / 预览淡入淡出 | 能力边界 | ⏳ 权威渲染已对齐，Interactive 淡入与全片入口待补 | [`BACKLOG#p187`](BACKLOG.md#p187) |

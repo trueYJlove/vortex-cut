@@ -20,7 +20,7 @@
 - [x] **0.2 P217** Graphite 弹窗：整体核销确认（28 个弹窗证据见 `evidence/2026-11-09-dialog-family-c/`），结论并入 `specs/desktop-ui.md` §2 后移除。（2026-11-28 已核销：28 个已登记弹窗 11 份守卫测试全绿，长期结论已并入 specs/desktop-ui.md §2）
 - [x] **0.3 P230** 五项观察：①②③⑤ 已落地，④ 由 P231、预抽由 P232 接续 → 直接核销。（2026-11-28 已核销：①②③⑤ 长期结论并入 specs/timeline-and-editing.md §1.3，④ 由 P231 承接、预抽由已核销的 P232 闭环）
 - [x] **0.4 P231** 补 A2 `ffmpeg`/IR 逐像素对拍证据，达标后核销。（2026-11-28 已核销：修复 ffmpeg.py 4 处多轨/盒模型缺陷，test_p231_a2_pixel_parity_real.py + 真媒体回归 + pnpm run ci 全绿）
-- [ ] **0.5 P206** 补 `App.tsx` `assetOriginalRatio` 在“适应”模式读取 `rotation` + 竖拍铺满画布回归锁测试，完成后核销。
+- [x] **0.5 P206** 补 `App.tsx` `assetOriginalRatio` 在“适应”模式读取 `rotation` + 竖拍铺满画布回归锁测试，完成后核销。（2026-11-28 已核销：原「适应」assetOriginalRatio 已由 2026-11-18 画布比例真源裁决取代；补修 ffmpeg.py _pip_overlay_chain 旋转换轴并补全 IR/FFmpeg 真渲染/Desktop texSwap 竖拍铺满回归锁，同时在 setup.ts 同步 asyncUtilTimeout 至 5s，pnpm run ci 全绿）
 - [ ] **0.6 P220** 按 D3 写入别名 `--vc-accent: var(--dlg-primary)`（第一步），后续替换随日常改动推进；别名落地后 P220 行改为“迁移中”。
 - [ ] **0.7 Wave1-L3**（需人工）：用户真机听感/审美签字。
 - [ ] **0.8 P227**（需人工真机）：4K 对照、`VITE_AIVS_GPU=1` 回退无黑屏、假硬解提示验证。
@@ -38,7 +38,7 @@
 - [ ] **A.1 P216 路线裁决**：推荐“从 `ffprobe.py` 补全 profile/level 生成真实 codec string”为主，保留运行时坏帧降级兜底；实施前确认。
 - [ ] **A.2 P203** 代理就绪后是否仍挂死的复测 + 冷却回切安全验证，修根因或明确边界。
 - [ ] **A.3 P204** 结合 P203 完成含 `elst` 素材完整播放闭环验收。
-- [ ] **A.4 P206** 若 0.5 未完成，在此完成。
+- [x] **A.4 P206** 若 0.5 未完成，在此完成。（已在 0.5 完成核销）
 
 ## 4. 并行线 B：P200 限期排查
 

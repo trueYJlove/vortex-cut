@@ -76,11 +76,6 @@
 - **出处**：`decode-worker.worker.ts` / `evidence/2026-11-01-iphone-hevc-blockers/README.md`
 - **要点**：根因为 demuxer 未应用 `elst` `media_time` 导致索引首帧 PTS 偏移 0.625s；待结合 P203 完成完整播放闭环验收。
 
-### P206 · iPhone 竖拍（`rotation=-90`）素材呈现方向与内容包围盒回归锁 {#p206}
-- **类型 / 状态**：缺陷修复｜🟡 **已交付 `-noautorotate` 与 IR `display_width/height/rotation`，缺「适应」读 `rotation` 与铺满回归锁**
-- **出处**：`services/core/src/aivs_core/rendering/ir.py` / `media/frame_decode.py` / `App.tsx`
-- **要点**：`test_frame_decode_rotation.py` 3 项已守住不花屏；待补 `App.tsx` `assetOriginalRatio` 在「适应」时读取 `rotation` 及竖拍铺满画布回归锁。
-
 ### P207 · 预览代理自动生成、自然切换与持久化边界 {#p207}
 - **类型 / 状态**：缺陷修复｜🟡 **已交付导入自动生代理与暂停切换，保留两项非阻塞边界**
 - **出处**：`apps/desktop/src/app/App.tsx` / `app/preview/source-resolver.ts`
