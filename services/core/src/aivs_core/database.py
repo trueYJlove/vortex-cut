@@ -976,6 +976,16 @@ MIGRATIONS: dict[str, str] = {
     V43_VERSION: V43_SQL,
     V44_VERSION: V44_SQL,
 }
+_MIGRATION_SQL_CHECKSUMS: dict[str, str] = {
+    sql: hashlib.sha256(sql.encode("utf-8")).hexdigest() for sql in MIGRATIONS.values()
+}
+
+
+def _migration_checksum(sql: str) -> str:
+    cached = _MIGRATION_SQL_CHECKSUMS.get(sql)
+    if cached is not None:
+        return cached
+    return hashlib.sha256(sql.encode("utf-8")).hexdigest()
 
 
 class Database:
@@ -1012,7 +1022,7 @@ class Database:
                 raise MigrationError(f"未知数据库版本: {sorted(unknown)}")
             pending: list[tuple[str, str, str]] = []
             for version, sql in MIGRATIONS.items():
-                checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+                checksum = _migration_checksum(sql)
                 if version in applied:
                     if applied[version] != checksum:
                         raise MigrationError(f"迁移校验和不匹配: {version}")
@@ -1123,7 +1133,7 @@ class Database:
     def _ensure_v1_columns(db: sqlite3.Connection) -> None:
         columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
         if "kind" in columns:
-            db.execute("UPDATE jobs SET kind=COALESCE(kind,type)")
+            db.execute("UPDATE jobs SET kind=COALESCE(kind,type) WHERE kind IS NULL")
 
     @staticmethod
     def _apply_v2_compatibility(db: sqlite3.Connection) -> None:
