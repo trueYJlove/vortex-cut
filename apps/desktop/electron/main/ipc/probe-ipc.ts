@@ -1,6 +1,6 @@
 import { app, ipcMain, screen } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { RestrictedMediaRegistry } from "../restricted-media.js";
 
 /**
@@ -40,6 +40,25 @@ export function probeLoadQuery(): string {
 
 export interface ProbeIpcHandle {
   noteRenderGone: () => void;
+}
+
+export function resolveProbeArtifactTarget(evidenceDir: string, relPathValue: unknown): string {
+  if (
+    typeof relPathValue !== "string"
+    || relPathValue.length === 0
+    || relPathValue.includes("..")
+    || relPathValue.startsWith("/")
+    || relPathValue.startsWith("\\")
+    || isAbsolute(relPathValue)
+  ) {
+    throw new Error("Invalid artifact path");
+  }
+  const target = resolve(evidenceDir, relPathValue);
+  const rel = relative(evidenceDir, target);
+  if (!rel || rel === "." || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error("Artifact path escapes evidence dir");
+  }
+  return target;
 }
 
 export function registerProbeIpc(deps: { registry: RestrictedMediaRegistry }): ProbeIpcHandle | null {
@@ -83,11 +102,7 @@ export function registerProbeIpc(deps: { registry: RestrictedMediaRegistry }): P
     return deps.registry.issue(entityIdValue, "asset");
   });
   ipcMain.handle("probe:write-artifact", (_event, relPathValue: unknown, content: unknown) => {
-    if (typeof relPathValue !== "string" || relPathValue.includes("..") || relPathValue.startsWith("/")) {
-      throw new Error("Invalid artifact path");
-    }
-    const target = resolve(evidenceDir, relPathValue);
-    if (!target.startsWith(evidenceDir + sep)) throw new Error("Artifact path escapes evidence dir");
+    const target = resolveProbeArtifactTarget(evidenceDir, relPathValue);
     mkdirSync(join(target, ".."), { recursive: true });
     if (typeof content === "string") {
       writeFileSync(target, content, "utf8");
